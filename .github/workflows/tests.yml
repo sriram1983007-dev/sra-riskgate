@@ -1,0 +1,49 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core:
+    name: core (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[test]"
+      - run: pytest -q tests
+
+  agentkit:
+    name: agentkit integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[agentkit,test]"
+      - run: pytest -q tests
+        env:
+          DO_NOT_TRACK: "1"
+
+  wheel:
+    name: built wheel in a clean environment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build && python -m build
+      - run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl pytest eth-abi
+          mv sra_riskgate /tmp/src_hidden
+          /tmp/clean/bin/python -m pytest -q tests

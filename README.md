@@ -11,9 +11,8 @@ Risk checks for stablecoin and AI-agent payments.
 This repository contains:
 
 - **`sra-riskgate`**, a small Python SDK with deterministic pre-filter rules (address validation,
-  self-transfer blocking, amount ceilings, USDC depeg checks in both directions) and a
-  [Coinbase AgentKit](https://github.com/coinbase/agentkit) action provider that sends USDC only
-  after those rules approve.
+  self-transfer blocking, amount ceilings, USDC depeg checks in both directions), plus integrations for
+  [x402](https://github.com/x402-foundation/x402) payment flows and [Coinbase AgentKit](https://github.com/coinbase/agentkit).
 - **`eval/`**, the scripts used to benchmark the
   [SRA-RiskGate-4B](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) model on
   [sra-stablecoin-risk-bench](https://huggingface.co/datasets/sriram1983007/sra-stablecoin-risk-bench).

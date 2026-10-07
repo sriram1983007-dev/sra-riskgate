@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sra-riskgate"
-version = "0.3.5"
+version = "0.4.0"
 description = "Deterministic pre-filter and risk evaluation gate for stablecoin transactions"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "Sriram Ramakrishnan" }]
 dependencies = ["pydantic>=2.0"]
-keywords = ["stablecoin", "payments", "compliance", "risk", "x402", "usdc", "agentkit"]
+keywords = ["stablecoin", "payments", "compliance", "risk", "x402", "usdc", "agentkit", "ai-agents"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
@@ -27,6 +27,7 @@ Changelog = "https://github.com/sriram1983007-dev/sra-riskgate/blob/main/CHANGEL
 [project.optional-dependencies]
 # solana is pinned because coinbase-agentkit 0.7.4 fails to import with solana 0.40.x
 agentkit = ["coinbase-agentkit>=0.7.4,<0.8", "solana>=0.36.6,<0.37"]
+x402 = ["x402[evm]>=2.25,<3"]
 test = ["pytest>=7", "eth-abi>=5"]
 
 [tool.setuptools.packages.find]

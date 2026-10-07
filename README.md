@@ -26,6 +26,7 @@ deterministic first layer; the model handles the full policy and evidence review
 ```bash
 pip install sra-riskgate                 # core rules (only dependency: pydantic)
 pip install "sra-riskgate[agentkit]"     # plus the Coinbase AgentKit integration
+pip install "sra-riskgate[x402]"         # plus the x402 integration
 ```
 
 ## Rule pre-filter
@@ -74,6 +75,31 @@ The agent gets one action, `risk_gated_usdc_transfer`. It sends USDC as an ERC-2
 (never the native token) on Ethereum, Base and Base Sepolia, reads the chain from the wallet,
 reports reverted transactions as failures, and holds the transfer if the peg feed errors.
 Without a `peg_feed`, depeg checks are disabled and every result says so.
+
+## x402 hooks
+
+Works with the official [x402](https://github.com/x402-foundation/x402) Python SDK through its
+lifecycle hooks, so the same checks run wherever x402 is used.
+
+```python
+from x402 import x402FacilitatorSync, x402ClientSync
+from sra_riskgate.integrations.x402_hooks import RiskGateX402Hooks
+
+# Resource server or facilitator: checked before verification and before settlement
+facilitator = RiskGateX402Hooks(max_amount=1000).attach_to_facilitator(x402FacilitatorSync())
+
+# Paying agent: checked before the agent signs anything
+client = RiskGateX402Hooks(max_amount=50, payer_address=MY_WALLET).attach_to_client(x402ClientSync())
+```
+
+Rejected, held, malformed or unknown payments are aborted with a reason starting with
+`sra_riskgate_` (for example `sra_riskgate_hold`), which x402 raises as `PaymentAbortedError`.
+USDC on Ethereum, Base and Base Sepolia is checked; other assets are aborted unless
+`allow_unsupported_assets=True`. Pass `peg_feed` to enable depeg checks and `on_decision` to log
+every decision. x402's own client spend controls stay active alongside these checks.
+
+Requires x402 2.25 or newer. Coinbase AgentKit 0.7.x currently depends on the older x402 1.x, so
+install the `[agentkit]` and `[x402]` extras in separate environments.
 
 ## Model results
 

@@ -101,6 +101,10 @@ every decision. x402's own client spend controls stay active alongside these che
 Requires x402 2.25 or newer. Coinbase AgentKit 0.7.x currently depends on the older x402 1.x, so
 install the `[agentkit]` and `[x402]` extras in separate environments.
 
+## MCP server
+
+For AI assistants and agents (Claude Desktop, Cursor and other MCP clients), [`sra-riskgate-mcp`](https://github.com/sriram1983007-dev/sra-riskgate-mcp) exposes these checks as MCP tools, including an x402 payment check and a model-backed review. It's listed in the official MCP Registry as `io.github.sriram1983007-dev/sra-riskgate-mcp`.
+
 ## Model results
 
 Independently reproduced on all 2,000 held-out test cases, with every prediction published in

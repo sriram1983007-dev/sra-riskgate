@@ -22,12 +22,7 @@ except ImportError as e:  # pragma: no cover
         "The AgentKit integration needs the extra: pip install 'sra-riskgate[agentkit]'"
     ) from e
 
-USDC_ADDRESSES: dict[int, str] = {  # all 6 decimals
-    1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",      # Ethereum mainnet
-    8453: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",   # Base mainnet
-    84532: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",  # Base Sepolia
-}
-USDC_DECIMALS = 6
+from sra_riskgate.chains import USDC_ADDRESSES, USDC_DECIMALS  # noqa: E402
 _TRANSFER_SELECTOR = "a9059cbb"
 
 

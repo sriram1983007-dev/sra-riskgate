@@ -33,6 +33,17 @@ jobs:
         env:
           DO_NOT_TRACK: "1"
 
+  x402:
+    name: x402 integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[x402,test]"
+      - run: pytest -q tests
+
   wheel:
     name: built wheel in a clean environment
     runs-on: ubuntu-latest

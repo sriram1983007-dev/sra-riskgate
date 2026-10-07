@@ -75,3 +75,12 @@ def test_legacy_signed_names_and_amount():
 
 def test_riskgate_alias():
     assert RiskGate().inspect(tx()).decision.value == "approve"
+
+
+def test_version_matches_pyproject():
+    import pathlib, re
+    import sra_riskgate
+    pyproject = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if pyproject.exists():
+        declared = re.search(r'^version = "([^"]+)"', pyproject.read_text(), re.M).group(1)
+        assert sra_riskgate.__version__ == declared

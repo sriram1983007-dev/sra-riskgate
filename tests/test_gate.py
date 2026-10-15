@@ -84,3 +84,16 @@ def test_version_matches_pyproject():
     if pyproject.exists():
         declared = re.search(r'^version = "([^"]+)"', pyproject.read_text(), re.M).group(1)
         assert sra_riskgate.__version__ == declared
+
+
+def test_missing_peg_is_flagged_not_silently_perfect():
+    from sra_riskgate import RulePreFilter, TransactionPayload
+    base = dict(chain_id=8453, token="USDC", sender="0x" + "a" * 40, recipient="0x" + "b" * 40, amount=5)
+    v = RulePreFilter().inspect(TransactionPayload(**base))
+    assert v.decision.value == "approve" and v.flags == ["PEG_NOT_CHECKED"] and "skipped" in v.explanation
+    v = RulePreFilter().inspect(TransactionPayload(**base, peg_deviation_pct=None))
+    assert v.flags == ["PEG_NOT_CHECKED"]
+    v = RulePreFilter().inspect(TransactionPayload(**base, peg_deviation_pct=0.1))
+    assert v.flags == [] and TransactionPayload(**base, peg_deviation_pct=0.1).peg_observed
+    v = RulePreFilter(max_amount=1).inspect(TransactionPayload(**base))
+    assert v.decision.value == "hold" and set(v.flags) == {"HIGH_VALUE_TRANSFER", "PEG_NOT_CHECKED"}

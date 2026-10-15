@@ -18,6 +18,18 @@ class TransactionPayload(BaseModel):
     recipient: str = Field(..., description="42-character hex Ethereum address")
     amount: float = Field(..., description="Transfer amount in token units")
     peg_deviation_pct: Optional[float] = Field(0.0, description="Observed peg deviation percentage")
+    peg_observed: bool = Field(
+        True,
+        description="False when no peg deviation was supplied, so the depeg check could not run. "
+                    "Set automatically.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def note_peg_observed(cls, data):
+        if isinstance(data, dict) and "peg_observed" not in data:
+            data = {**data, "peg_observed": data.get("peg_deviation_pct") is not None}
+        return data
 
     @field_validator("peg_deviation_pct", mode="before")
     @classmethod

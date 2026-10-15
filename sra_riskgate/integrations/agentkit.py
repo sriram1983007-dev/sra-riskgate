@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from sra_riskgate.client import RulePreFilter
 from sra_riskgate.models import ActionDecision, TransactionPayload
+from sra_riskgate.payload_claims import scan_payload_claims
 
 try:
     from coinbase_agentkit import ActionProvider, EvmWalletProvider, create_action
@@ -88,6 +89,11 @@ class RiskGateActionProvider(ActionProvider[EvmWalletProvider]):
             amount = Decimal(req.amount_usdc)
         except (ValueError, InvalidOperation) as e:
             return f"BLOCKED: invalid input ({e})."
+
+        claims = scan_payload_claims(req.memo)
+        if claims:
+            return (f"HELD for human review: the memo claims its own verification ({claims[0].match!r}). "
+                    "Transfer not sent.")
 
         chain_id = _chain_id(wallet_provider.get_network())
         usdc = USDC_ADDRESSES.get(chain_id)

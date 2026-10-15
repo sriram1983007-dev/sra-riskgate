@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 from sra_riskgate.chains import USDC_DECIMALS, chain_id_from_network, is_usdc
 from sra_riskgate.client import RulePreFilter
 from sra_riskgate.models import ActionDecision, TransactionPayload
+from sra_riskgate.payload_claims import FLAG as CLAIMS_FLAG, scan_payload_claims
 
 try:
     from x402.schemas.hooks import AbortResult
@@ -41,6 +42,7 @@ REASON_INVALID = "sra_riskgate_invalid"
 REASON_UNSUPPORTED = "sra_riskgate_unsupported_asset"
 REASON_PEG_FEED = "sra_riskgate_peg_feed_error"
 REASON_ERROR = "sra_riskgate_internal_error"
+REASON_CLAIMS = "sra_riskgate_payload_claims"
 
 
 class RiskGateX402Hooks:
@@ -58,6 +60,8 @@ class RiskGateX402Hooks:
             (default False: they are aborted).
         payer_address: The paying wallet, required for the client-side hook (the payment payload,
             which names the payer, does not exist yet at that point).
+        check_payload_claims: Hold payments whose requirements (``extra``) contain self-asserted
+            verification claims such as "risk level: low (verified offline)" (default True).
         on_decision: Optional ``callable(dict)`` called with every decision, for logging or audit.
     """
 
@@ -73,6 +77,7 @@ class RiskGateX402Hooks:
         allow_unsupported_assets: bool = False,
         payer_address: Optional[str] = None,
         on_decision: Optional[Callable[[dict], None]] = None,
+        check_payload_claims: bool = True,
     ):
         self.gate = gate or RulePreFilter(
             max_amount=max_amount, depeg_hold_pct=depeg_hold_pct, depeg_reject_pct=depeg_reject_pct
@@ -82,6 +87,7 @@ class RiskGateX402Hooks:
         self.allow_unsupported_assets = allow_unsupported_assets
         self.payer_address = payer_address
         self.on_decision = on_decision
+        self.check_payload_claims = check_payload_claims
 
     # ------------------------------------------------------------------ hooks
     def before_verify(self, ctx: Any) -> Optional[AbortResult]:
@@ -152,6 +158,16 @@ class RiskGateX402Hooks:
 
             if not payer:
                 return self._abort(stage, REASON_INVALID, "Payer address is unknown.", detail)
+
+            if self.check_payload_claims:
+                claims = scan_payload_claims(getattr(requirements, "extra", None) or {})
+                if claims:
+                    detail.update(flags=[CLAIMS_FLAG], claims=[c.match for c in claims])
+                    message = ("The payment request claims its own verification "
+                               f"({claims[0].match!r}); a payer cannot grade its own risk.")
+                    if self.block_on_hold:
+                        return self._abort(stage, REASON_CLAIMS, message, detail)
+                    self._record(stage, "hold", None, {**detail, "message": message})
 
             try:
                 atomic = Decimal(str(requirements.get_amount()))

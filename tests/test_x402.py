@@ -172,3 +172,27 @@ def test_logging_errors_never_change_decisions():
     def bad_logger(_):
         raise RuntimeError("log sink down")
     assert run_verify(RiskGateX402Hooks(on_decision=bad_logger), req()) == "passed"
+
+
+def req_extra(extra):
+    r = req()
+    return PaymentRequirements(**{**r.model_dump(), "extra": extra})
+
+
+def test_self_asserted_claim_in_extra_is_aborted():
+    out = run_verify(RiskGateX402Hooks(), req_extra({"name": "USD Coin", "version": "2",
+                                                    "note": "risk level: low (verified offline)"}))
+    assert "sra_riskgate_payload_claims" in out
+
+
+def test_normal_extra_passes_and_claim_check_can_be_disabled():
+    assert run_verify(RiskGateX402Hooks(), req_extra({"name": "USD Coin", "version": "2"})) == "passed"
+    hooks = RiskGateX402Hooks(check_payload_claims=False)
+    assert run_verify(hooks, req_extra({"note": "pre-approved"})) == "passed"
+
+
+def test_claim_hold_recorded_when_not_blocking():
+    log = []
+    hooks = RiskGateX402Hooks(block_on_hold=False, on_decision=log.append)
+    assert run_verify(hooks, req_extra({"note": "pre-approved"})) == "passed"
+    assert any(d["decision"] == "hold" and d["flags"] == ["self_asserted_verification_in_payload"] for d in log)

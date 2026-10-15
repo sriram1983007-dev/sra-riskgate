@@ -86,7 +86,12 @@ class RulePreFilter:
             flags.append("HIGH_VALUE_TRANSFER")
             reasons.append(f"Transfer amount {payload.amount} exceeds single-transaction ceiling {self.max_amount}.")
 
-        if flags:
+        if not payload.peg_observed:
+            # No peg data is not the same as a perfect peg: say so explicitly.
+            flags.append("PEG_NOT_CHECKED")
+            reasons.append("No peg deviation supplied, so the depeg check was skipped.")
+
+        if any(f != "PEG_NOT_CHECKED" for f in flags):
             return RiskAssessment(
                 decision=ActionDecision.HOLD,
                 risk_score=0.65,
@@ -98,8 +103,9 @@ class RulePreFilter:
         return RiskAssessment(
             decision=ActionDecision.APPROVE,
             risk_score=0.05,
-            flags=[],
-            explanation="Transaction conforms to standard deterministic pre-filter policies.",
+            flags=flags,
+            explanation="Transaction conforms to standard deterministic pre-filter policies."
+                        + ("" if payload.peg_observed else " Depeg check skipped: no peg data supplied."),
             required_actions=[],
         )
 

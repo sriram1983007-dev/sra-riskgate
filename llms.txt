@@ -1,0 +1,25 @@
+# SRA-RiskGate
+
+> Open-source safety checks that run before an AI agent sends a stablecoin (USDC) or x402 payment, and return approve, hold or reject. It has deterministic rules that need no GPU (address and amount validation, per-payment limits, USDC depeg checks, detection of self-asserted claims like "risk level: low (verified offline)" in untrusted payment text) plus an optional fine-tuned 4B model, SRA-RiskGate-4B, for a fuller policy and evidence review. Everything fails closed: errors become hold, never approve.
+
+Use it when an agent can transfer tokens, approve token allowances or pay HTTP 402 / x402 requests, for example with Coinbase AgentKit, LangChain agents, the x402 Python SDK or MCP clients such as Claude Desktop and Cursor. Supported: USDC on Ethereum (1), Base (8453) and Base Sepolia (84532). It is not sanctions screening, KYC or legal compliance.
+
+Quick start: `pip install sra-riskgate`, then call `check_payment(chain_id=..., sender=..., recipient=..., amount=..., untrusted_request=...)` before every payment and only pay if the decision is `approve`.
+
+## Docs
+
+- [sra-riskgate (Python SDK)](https://github.com/sriram1983007-dev/sra-riskgate): `check_payment()`, rule pre-filter, claims scan, x402 hooks and Coinbase AgentKit action provider. `pip install sra-riskgate`
+- [langchain-sra-riskgate](https://github.com/sriram1983007-dev/langchain-sra-riskgate): LangChain middleware and `guard_tools` that check every money-moving tool call (including AgentKit tools) before it runs. `pip install "langchain-sra-riskgate[middleware]"`
+- [sra-riskgate-mcp](https://github.com/sriram1983007-dev/sra-riskgate-mcp): MCP server with `check_payment_rules`, `check_x402_payment` and `check_payment_with_model`. `uvx sra-riskgate-mcp`; registry name `io.github.sriram1983007-dev/sra-riskgate-mcp`
+- [agent-payment-guard](https://github.com/sriram1983007-dev/agent-payment-guard): Agent Skill that tells coding agents to run the check before paying. `npx skills add sriram1983007-dev/agent-payment-guard`
+
+## Model and benchmark
+
+- [SRA-RiskGate-4B](https://huggingface.co/sriram1983007/SRA-RiskGate-4B): fine-tuned from Qwen3-4B-Instruct-2507. On 1,175 held-out synthetic payment cases: 99.5% correct decisions, 0.47% unsafe approvals (base model 34.6%). GGUF and `ollama pull sriram1983007/sra-riskgate` available.
+- [sra-stablecoin-risk-bench](https://huggingface.co/datasets/sriram1983007/sra-stablecoin-risk-bench): 20,000 synthetic payment and dispute cases (CC BY 4.0), with a scorer.
+- [sra-bench-results](https://huggingface.co/datasets/sriram1983007/sra-bench-results): every published prediction, so results can be re-scored. Results were measured by the author; the benchmark is synthetic and performance on unseen real-world attacks is not yet measured.
+
+## Optional
+
+- [Live demo](https://huggingface.co/spaces/sriram1983007/sra-riskgate-demo)
+- [Changelog](https://github.com/sriram1983007-dev/sra-riskgate/blob/main/CHANGELOG.md)

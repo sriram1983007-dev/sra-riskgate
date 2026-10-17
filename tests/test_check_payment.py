@@ -70,6 +70,8 @@ def test_reject_beats_claims_hold():
     {"amount": -5},
     {"amount": math.nan},
     {"amount": math.inf},
+    {"amount": True},
+    {"amount": False},
 ])
 def test_invalid_payment_rejects(change):
     r = check_payment(**{**OK, **change})

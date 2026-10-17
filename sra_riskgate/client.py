@@ -1,5 +1,8 @@
 import math
+from typing import Optional
+
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
+from sra_riskgate.sanctions import FLAG as SANCTIONS_FLAG, NOT_CHECKED_FLAG, SanctionsList
 
 # Legacy keyword names accepted for backwards compatibility.
 # In 0.1.x, `max_allowed_deviation_pct` was the HOLD threshold (reject was fixed at 5%).
@@ -15,7 +18,11 @@ class RulePreFilter:
     """Deterministic rule-based pre-filter for stablecoin transactions.
 
     This is NOT the SRA-RiskGate-4B model. It is a fast, zero-dependency first pass
-    (depeg bounds, amount ceiling, payload validation) to run before the model.
+    (OFAC SDN address match, depeg bounds, amount ceiling, payload validation) to run before the model.
+
+    Sanctions: by default sender and recipient are matched against the bundled OFAC SDN snapshot
+    (see ``sra_riskgate.sanctions``); a match is a REJECT. Pass ``sanctions_list`` to use a fresher
+    list, or ``check_sanctions=False`` to turn the match off (results then carry SANCTIONS_NOT_CHECKED).
     """
 
     def __init__(
@@ -23,13 +30,16 @@ class RulePreFilter:
         max_amount: float = 50_000.0,
         depeg_hold_pct: float = 1.0,
         depeg_reject_pct: float = 5.0,
+        *,
+        check_sanctions: bool = True,
+        sanctions_list: Optional[SanctionsList] = None,
         **kwargs,
     ):
         unknown = set(kwargs) - _LEGACY_KWARGS
         if unknown:
             raise TypeError(
                 f"Unknown argument(s): {', '.join(sorted(unknown))}. "
-                "Valid arguments: max_amount, depeg_hold_pct, depeg_reject_pct."
+                "Valid arguments: max_amount, depeg_hold_pct, depeg_reject_pct, check_sanctions, sanctions_list."
             )
 
         if "max_amount_usdc" in kwargs:
@@ -51,11 +61,48 @@ class RulePreFilter:
         if not (0 < depeg_hold_pct < depeg_reject_pct):
             raise ValueError("Thresholds must satisfy 0 < depeg_hold_pct < depeg_reject_pct.")
 
+        if not isinstance(check_sanctions, bool):
+            raise ValueError(f"check_sanctions must be True or False, got {check_sanctions!r}.")
+        if sanctions_list is not None and not isinstance(sanctions_list, SanctionsList):
+            raise ValueError("sanctions_list must be a SanctionsList (see SanctionsList.from_file).")
+        self.check_sanctions = check_sanctions
+        self._sanctions_list = sanctions_list
+
         self.max_amount = float(max_amount)
         self.depeg_hold_pct = float(depeg_hold_pct)
         self.depeg_reject_pct = float(depeg_reject_pct)
 
+    @property
+    def sanctions_list(self) -> Optional[SanctionsList]:
+        """The list used for matching (the bundled snapshot unless one was supplied); None if disabled."""
+        if not self.check_sanctions:
+            return None
+        return self._sanctions_list or SanctionsList.bundled()
+
+    def screen_sanctions(self, sender: object, recipient: object) -> Optional[RiskAssessment]:
+        """A REJECT if sender or recipient is on the sanctions list, else None. Raises if the list cannot load."""
+        lst = self.sanctions_list
+        if lst is None:
+            return None
+        hits = lst.screen(sender, recipient)
+        if not hits:
+            return None
+        who = " and ".join(f"{party} {addr}" for party, addr in hits)
+        return RiskAssessment(
+            decision=ActionDecision.REJECT,
+            risk_score=1.0,
+            flags=[SANCTIONS_FLAG] + [f"SANCTIONED_{party.upper()}" for party, _ in hits],
+            explanation=(f"The {who} is on the OFAC SDN list ({lst.describe()}). Do not pay. "
+                         "This is an exact address match, not a compliance determination; "
+                         "refer it to your compliance process."),
+            required_actions=["reject_payment", "refer_to_compliance"],
+        )
+
     def inspect(self, payload: TransactionPayload) -> RiskAssessment:
+        sanctioned = self.screen_sanctions(payload.sender, payload.recipient)
+        if sanctioned is not None:
+            return sanctioned
+
         peg_dev = payload.peg_deviation_pct if payload.peg_deviation_pct is not None else 0.0
 
         if not math.isfinite(peg_dev):
@@ -90,8 +137,12 @@ class RulePreFilter:
             # No peg data is not the same as a perfect peg: say so explicitly.
             flags.append("PEG_NOT_CHECKED")
             reasons.append("No peg deviation supplied, so the depeg check was skipped.")
+        if not self.check_sanctions:
+            flags.append(NOT_CHECKED_FLAG)
+            reasons.append("Sanctions matching is turned off for this gate.")
 
-        if any(f != "PEG_NOT_CHECKED" for f in flags):
+        notes = ("PEG_NOT_CHECKED", NOT_CHECKED_FLAG)
+        if any(f not in notes for f in flags):
             return RiskAssessment(
                 decision=ActionDecision.HOLD,
                 risk_score=0.65,
@@ -105,7 +156,8 @@ class RulePreFilter:
             risk_score=0.05,
             flags=flags,
             explanation="Transaction conforms to standard deterministic pre-filter policies."
-                        + ("" if payload.peg_observed else " Depeg check skipped: no peg data supplied."),
+                        + ("" if payload.peg_observed else " Depeg check skipped: no peg data supplied.")
+                        + ("" if self.check_sanctions else " Sanctions matching is turned off."),
             required_actions=[],
         )
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.0
+- **New: offline OFAC SDN address match.** `check_payment` and `RulePreFilter` now **reject** a payment
+  whose sender or recipient is on the US Treasury OFAC SDN list, with flags `OFAC_SDN_MATCH` and
+  `SANCTIONED_RECIPIENT` / `SANCTIONED_SENDER` and required actions `reject_payment`,
+  `refer_to_compliance`. The package bundles 124 Ethereum-format addresses (as of 2026-10-01), taken
+  from the open-source ofac-sanctioned-digital-currency-addresses extraction of OFAC's list. No network
+  call or API key.
+- In `check_payment` the sanctions match runs first, so a sanctioned counterparty is a reject even on an
+  unsupported chain or token.
+- New `SanctionsList` (`from_file`, `from_addresses`, `bundled`) and `is_sanctioned()`. Pass
+  `sanctions_list=` to use a fresher list, or `check_sanctions=False` to turn the match off (results then
+  carry `SANCTIONS_NOT_CHECKED`).
+- The x402 hooks and the AgentKit action provider get the same check through `RulePreFilter`.
+- Fails closed: if the list cannot be loaded, `check_payment` returns `hold` (`CHECK_FAILED`).
+- **Behaviour change:** payments to or from listed addresses that were approved before are now rejected.
+  Everything else decides exactly as in 0.6.1.
+- It is an exact match against a dated snapshot, not a sanctions screening service or a compliance
+  determination; the README says so.
+
+## 0.6.1
+- Fix: `check_payment` rejects a boolean `amount` with `INVALID_PAYMENT` (`True` was read as 1 USDC).
+- PyPI page: model results are now described as measured by the author in two identical full runs,
+  not "independently reproduced" (the 0.6.0 page still had the old wording).
+- README: links to the free Kaggle notebook and the Kaggle copy of the benchmark.
+
 ## 0.6.0
 - New `check_payment()`: one fail-closed call before every payment. It checks the asset and chain
   (USDC on Ethereum, Base, Base Sepolia), validates addresses and amount, runs `RulePreFilter` and scans

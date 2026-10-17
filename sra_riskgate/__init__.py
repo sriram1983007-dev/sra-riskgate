@@ -2,6 +2,7 @@ from .client import RiskGate, RulePreFilter
 from .models import TransactionPayload, RiskAssessment, ActionDecision
 from .payload_claims import PayloadClaim, scan_payload_claims
 from .check import check_payment
+from .sanctions import SanctionsList, is_sanctioned
 
 __all__ = [
     "RiskGate",
@@ -12,5 +13,7 @@ __all__ = [
     "PayloadClaim",
     "scan_payload_claims",
     "check_payment",
+    "SanctionsList",
+    "is_sanctioned",
 ]
-__version__ = "0.6.0"
+__version__ = "0.7.0"

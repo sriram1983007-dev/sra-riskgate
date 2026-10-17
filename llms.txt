@@ -1,8 +1,8 @@
 # SRA-RiskGate
 
-> Open-source safety checks that run before an AI agent sends a stablecoin (USDC) or x402 payment, and return approve, hold or reject. It has deterministic rules that need no GPU (address and amount validation, per-payment limits, USDC depeg checks, detection of self-asserted claims like "risk level: low (verified offline)" in untrusted payment text) plus an optional fine-tuned 4B model, SRA-RiskGate-4B, for a fuller policy and evidence review. Everything fails closed: errors become hold, never approve.
+> Open-source safety checks that run before an AI agent sends a stablecoin (USDC) or x402 payment, and return approve, hold or reject. It has deterministic rules that need no GPU (an offline match against OFAC's published sanctioned crypto addresses, address and amount validation, per-payment limits, USDC depeg checks, detection of self-asserted claims like "risk level: low (verified offline)" in untrusted payment text) plus an optional fine-tuned 4B model, SRA-RiskGate-4B, for a fuller policy and evidence review. Everything fails closed: errors become hold, never approve.
 
-Use it when an agent can transfer tokens, approve token allowances or pay HTTP 402 / x402 requests, for example with Coinbase AgentKit, LangChain agents, the x402 Python SDK or MCP clients such as Claude Desktop and Cursor. Supported: USDC on Ethereum (1), Base (8453) and Base Sepolia (84532). It is not sanctions screening, KYC or legal compliance.
+Use it when an agent can transfer tokens, approve token allowances or pay HTTP 402 / x402 requests, for example with Coinbase AgentKit, LangChain agents, the x402 Python SDK or MCP clients such as Claude Desktop and Cursor. Supported: USDC on Ethereum (1), Base (8453) and Base Sepolia (84532). The OFAC match is an exact address match against a dated snapshot; it is not a sanctions screening service, KYC or legal compliance.
 
 Quick start: `pip install sra-riskgate`, then call `check_payment(chain_id=..., sender=..., recipient=..., amount=..., untrusted_request=...)` before every payment and only pay if the decision is `approve`.
 

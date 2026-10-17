@@ -196,3 +196,12 @@ def test_claim_hold_recorded_when_not_blocking():
     hooks = RiskGateX402Hooks(block_on_hold=False, on_decision=log.append)
     assert run_verify(hooks, req_extra({"note": "pre-approved"})) == "passed"
     assert any(d["decision"] == "hold" and d["flags"] == ["self_asserted_verification_in_payload"] for d in log)
+
+
+def test_sanctioned_pay_to_is_rejected():
+    from sra_riskgate import SanctionsList
+    listed = sorted(SanctionsList.bundled().addresses)[0]
+    seen = []
+    hooks = RiskGateX402Hooks(on_decision=lambda *a: seen.append(a))
+    assert "sra_riskgate_reject" in run_verify(hooks, req(pay_to=listed))
+    assert "OFAC_SDN_MATCH" in repr(seen)

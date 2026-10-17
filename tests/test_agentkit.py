@@ -121,3 +121,11 @@ def test_memo_with_self_asserted_verification_is_held():
 def test_normal_memo_still_sends():
     w = MockWallet("8453")
     assert run(w, to=YOU, amount_usdc="5", memo="Search API call").startswith("SENT")
+
+
+def test_sanctioned_recipient_is_blocked_and_nothing_sent():
+    from sra_riskgate import SanctionsList
+    listed = sorted(SanctionsList.bundled().addresses)[0]
+    w = MockWallet("8453")
+    out = run(w, to=listed, amount_usdc="5")
+    assert out.startswith("BLOCKED") and "OFAC_SDN_MATCH" in out and w.sent == [] and w.native == []

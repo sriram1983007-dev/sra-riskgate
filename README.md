@@ -10,15 +10,16 @@ Risk checks for stablecoin and AI-agent payments.
 
 This repository contains:
 
-- **`sra-riskgate`**, a small Python SDK with deterministic pre-filter rules (address validation,
-  self-transfer blocking, amount ceilings, USDC depeg checks in both directions), plus integrations for
+- **`sra-riskgate`**, a small Python SDK with deterministic pre-filter rules (an offline OFAC SDN address
+  match, address validation, self-transfer blocking, amount ceilings, USDC depeg checks in both directions), plus integrations for
   [x402](https://github.com/x402-foundation/x402) payment flows and [Coinbase AgentKit](https://github.com/coinbase/agentkit).
 - **`eval/`**, the scripts used to benchmark the
   [SRA-RiskGate-4B](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) model on
   [sra-stablecoin-risk-bench](https://huggingface.co/datasets/sriram1983007/sra-stablecoin-risk-bench).
 
-The SDK does not load the 4B model and does not perform sanctions screening. It is a fast,
-deterministic first layer; the model handles the full policy and evidence review.
+The SDK does not load the 4B model. Its sanctions check is an exact match against a dated snapshot of
+OFAC's published crypto addresses, not a screening service (see [Sanctions](#sanctions-ofac-sdn-addresses)).
+It is a fast, deterministic first layer; the model handles the full policy and evidence review.
 
 ## Install
 
@@ -46,13 +47,14 @@ if result.decision != ActionDecision.APPROVE:
     print(result.decision.value, result.flags, result.explanation)   # do not pay
 ```
 
-`check_payment` runs the asset and chain check, address and amount validation, the rules below and the
-self-asserted claims scan, in that order. It never raises on bad payment data: invalid payments are
+`check_payment` runs the OFAC SDN address match, the asset and chain check, address and amount validation,
+the rules below and the self-asserted claims scan, in that order. It never raises on bad payment data: invalid payments are
 rejected, and anything unexpected (unsupported chain or token, a crash inside a check) becomes `hold`.
 Only pay on `approve`.
 
 | Situation | Decision | Flag |
 |---|---|---|
+| Sender or recipient is on the OFAC SDN list (bundled snapshot) | reject | `OFAC_SDN_MATCH` |
 | Token is not USDC, or chain is not Ethereum, Base or Base Sepolia | hold | `UNSUPPORTED_ASSET` / `UNSUPPORTED_CHAIN` |
 | Malformed, zero or self address; amount ≤ 0, NaN or infinite | reject | `INVALID_PAYMENT` |
 | Invalid thresholds | reject | `CONFIGURATION_ERROR` |
@@ -63,6 +65,40 @@ Only pay on `approve`.
 **Using a coding agent?** The [agent-payment-guard](https://github.com/sriram1983007-dev/agent-payment-guard)
 Agent Skill teaches Claude Code and other agents to run this check before paying and to add it to agent code:
 `npx skills add sriram1983007-dev/agent-payment-guard`.
+
+## Sanctions (OFAC SDN addresses)
+
+`check_payment` and `RulePreFilter` reject any payment to or from an address on the US Treasury OFAC
+Specially Designated Nationals (SDN) list. No API key or network call is needed: the package ships a
+snapshot of the 124 Ethereum-format addresses OFAC publishes (the same format is used on Base and
+other EVM chains), dated **2026-10-01**, taken from the open-source
+[ofac-sanctioned-digital-currency-addresses](https://github.com/0xB10C/ofac-sanctioned-digital-currency-addresses)
+extraction of OFAC's list.
+
+```python
+from sra_riskgate import SanctionsList, check_payment, is_sanctioned
+
+is_sanctioned("0x...")                       # True if on the bundled snapshot
+
+result = check_payment(chain_id=8453, sender=MY_WALLET, recipient=listed_address, amount=20.0)
+print(result.decision.value, result.flags)   # reject ['OFAC_SDN_MATCH', 'SANCTIONED_RECIPIENT']
+
+# Use a fresher list, for example one you download nightly
+fresh = SanctionsList.from_file("sanctioned_addresses_ETH.txt", as_of="2026-10-16")
+result = check_payment(chain_id=8453, sender=MY_WALLET, recipient=addr, amount=20.0, sanctions_list=fresh)
+```
+
+What it is and is not:
+
+- **An exact address match against a dated snapshot.** Addresses added to the SDN list after the snapshot
+  date are not included, so refresh the list or upgrade the package regularly. The reject explanation
+  always states the list and its date.
+- **Not a screening service or a compliance decision.** It does not trace funds, link wallets to
+  entities or cover other sanctions programmes. Keep your screening provider as the source of truth.
+- **Fails closed.** If the list cannot be loaded, `check_payment` returns `hold`. Turning the match off
+  (`check_sanctions=False`) is reported with the flag `SANCTIONS_NOT_CHECKED`.
+
+The x402 hooks, the AgentKit action provider and the MCP server use the same check through `RulePreFilter`.
 
 ## Rule pre-filter
 
@@ -82,6 +118,7 @@ print(verdict.decision.value, verdict.flags, verdict.required_actions)
 
 | Rule | Decision |
 |---|---|
+| Sender or recipient on the sanctions list | reject |
 | Malformed, zero or self address; non-positive or non-finite amount | rejected at validation |
 | Peg deviation NaN or infinite | reject |
 | abs(peg deviation) ≥ `depeg_reject_pct` | reject |
@@ -165,7 +202,9 @@ For AI assistants and agents (Claude Desktop, Cursor and other MCP clients), [`s
 
 Measured by the author in two separate full runs on all 2,000 held-out test cases (identical results), with
 every prediction published in [sra-bench-results](https://huggingface.co/datasets/sriram1983007/sra-bench-results)
-so anyone can re-score them. No third party has reproduced them yet:
+so anyone can re-score them. No third party has reproduced them yet. You can try the model on test cases for
+free in the [Kaggle notebook](https://www.kaggle.com/code/sriram1983007/try-sra-riskgate-4b-payment-safety-model)
+(the benchmark is also on [Kaggle](https://www.kaggle.com/datasets/sriram1983007/sra-stablecoin-risk-bench)).
 
 | Metric | Base Qwen3-4B | SRA-RiskGate-4B |
 |---|---|---|

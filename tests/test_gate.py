@@ -97,3 +97,12 @@ def test_missing_peg_is_flagged_not_silently_perfect():
     assert v.flags == [] and TransactionPayload(**base, peg_deviation_pct=0.1).peg_observed
     v = RulePreFilter(max_amount=1).inspect(TransactionPayload(**base))
     assert v.decision.value == "hold" and set(v.flags) == {"HIGH_VALUE_TRANSFER", "PEG_NOT_CHECKED"}
+
+
+def test_dust_usdc_payload_fails_validation_but_other_tokens_do_not():
+    from sra_riskgate import TransactionPayload
+    base = dict(chain_id=1, sender="0x" + "a" * 40, recipient="0x" + "b" * 40, peg_deviation_pct=0.0)
+    with pytest.raises(ValueError, match="smallest USDC unit"):
+        TransactionPayload(token="usdc", amount=1e-7, **base)
+    # the 6-decimal rule is USDC-specific; other tokens keep the old behaviour
+    assert TransactionPayload(token="DAI", amount=1e-7, **base).amount == 1e-7

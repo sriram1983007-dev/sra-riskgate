@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1
+- Fix: a USDC amount below one atomic unit (0.000001 USDC) is now rejected with `INVALID_PAYMENT`
+  ("below the smallest USDC unit"). Such an amount rounds to zero on-chain and can never execute, but
+  0.7.0 and earlier approved it (for example `amount=1e-7`). The check lives in `TransactionPayload`
+  validation, so `check_payment`, `RulePreFilter`, the AgentKit provider and the MCP rule tools all
+  reject it; the AgentKit provider now blocks it before sending instead of failing at encoding.
+- Amounts of at least 0.000001 USDC decide exactly as before; a remainder below one unit (e.g.
+  1.0000001) is still rounded down on-chain as before. Non-USDC tokens are unaffected.
+- Reported by an external review of 0.6.1.
+
 ## 0.7.0
 - **New: offline OFAC SDN address match.** `check_payment` and `RulePreFilter` now **reject** a payment
   whose sender or recipient is on the US Treasury OFAC SDN list, with flags `OFAC_SDN_MATCH` and

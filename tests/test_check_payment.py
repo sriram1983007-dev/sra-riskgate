@@ -142,3 +142,17 @@ def test_broken_gate_holds():
 def test_arguments_are_keyword_only():
     with pytest.raises(TypeError):
         check_payment(8453, A, B, 20.0)  # positional use is a programming error, not a payment decision
+
+
+@pytest.mark.parametrize("dust", [1e-7, 0.0000009, 5e-324, 1e-300])
+def test_dust_below_one_atomic_unit_rejects(dust):
+    r = check_payment(**{**OK, "amount": dust})
+    assert r.decision == ActionDecision.REJECT
+    assert r.flags == ["INVALID_PAYMENT"]
+    assert "smallest USDC unit" in r.explanation
+
+
+@pytest.mark.parametrize("amount", [0.000001, 0.0000019, 1.0000001])
+def test_smallest_unit_and_sub_unit_remainders_still_approve(amount):
+    # 1 atomic unit is payable; a remainder below one unit is simply rounded down on-chain
+    assert check_payment(**{**OK, "amount": amount}).decision == ActionDecision.APPROVE

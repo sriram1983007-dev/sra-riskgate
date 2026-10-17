@@ -71,7 +71,7 @@ def test_reverted_tx_is_not_reported_as_success():
     (dict(to=YOU, amount_usdc="-5"), "BLOCKED"),
     (dict(to=YOU, amount_usdc="abc"), "BLOCKED"),
     (dict(to=YOU, amount_usdc="NaN"), "BLOCKED"),
-    (dict(to=YOU, amount_usdc="0.0000001"), "FAILED"),  # rounds to 0 atomic units
+    (dict(to=YOU, amount_usdc="0.0000001"), "BLOCKED"),  # rounds to 0 atomic units: the gate rejects it (0.7.1)
 ])
 def test_bad_or_risky_requests_never_send(args, prefix):
     w = MockWallet()
@@ -129,3 +129,9 @@ def test_sanctioned_recipient_is_blocked_and_nothing_sent():
     w = MockWallet("8453")
     out = run(w, to=listed, amount_usdc="5")
     assert out.startswith("BLOCKED") and "OFAC_SDN_MATCH" in out and w.sent == [] and w.native == []
+
+
+def test_dust_amount_is_blocked_before_anything_is_sent():
+    w = MockWallet("8453")
+    out = run(w, to=YOU, amount_usdc="0.0000001")
+    assert out.startswith("BLOCKED") and w.sent == [] and w.native == []

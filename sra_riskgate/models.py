@@ -1,10 +1,12 @@
 import math
 import re
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+USDC_DECIMALS = 6
 
 class ActionDecision(str, Enum):
     APPROVE = "approve"
@@ -56,6 +58,20 @@ class TransactionPayload(BaseModel):
         if addr == ZERO_ADDRESS:
             raise ValueError("Zero address (0x0...0) is not permitted as sender or recipient.")
         return addr
+
+    @model_validator(mode="after")
+    def check_representable_amount(self):
+        """A USDC amount below one atomic unit (0.000001) rounds to zero on-chain and can never execute."""
+        if isinstance(self.token, str) and self.token.strip().upper() == "USDC":
+            try:
+                atomic = (Decimal(str(self.amount)) * (Decimal(10) ** USDC_DECIMALS)).to_integral_value(
+                    rounding=ROUND_DOWN)
+            except InvalidOperation:
+                raise ValueError("Amount is not a valid number.")
+            if atomic < 1:
+                raise ValueError(
+                    f"Amount {self.amount} is below the smallest USDC unit (0.000001) and rounds to zero on-chain.")
+        return self
 
     @model_validator(mode="after")
     def check_self_transfer(self):

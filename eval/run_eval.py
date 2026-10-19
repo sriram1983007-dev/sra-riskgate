@@ -4,6 +4,12 @@
 Every model gets the exact training prompts from the dataset's `sft` split (task-specific
 system prompt + tagged user message), so all comparisons use identical instructions.
 
+Prompt variants
+  training      (default) the exact training prompts, as used for every published run
+  spec          the training prompt plus the allowed labels and decision rules published with the
+                benchmark (schema/*.json and SPEC.md, see spec_prompt.json). Use this to give general
+                models the same rulebook without fine-tuning.
+
 Backends
   transformers  run a Hugging Face model on a local GPU (e.g. Colab T4/L4/A100)
   openai        any OpenAI-compatible API: OpenRouter, vLLM, llama-server, Ollama, OpenAI, ...
@@ -20,6 +26,10 @@ Examples
       --backend openai --base-url https://openrouter.ai/api/v1 --api-key-env OPENROUTER_API_KEY \\
       --model meta-llama/llama-3.3-70b-instruct --workers 16
 
+  # A reasoning model with the published spec: no temperature, larger output budget
+  python run_eval.py --name some-model-spec --backend openai --model provider/model-id \\
+      --prompt-variant spec --reasoning low --no-temperature --max-new-tokens 8192
+
 Outputs in results/<name>/
   predictions.jsonl   {"id": ..., "prediction": "<raw model output>"}   (the format score.py reads)
   test.jsonl          gold rows, exactly as score.py expects
@@ -31,6 +41,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
+from collections import Counter
 import subprocess
 import sys
 import threading
@@ -75,7 +87,7 @@ def training_prompt(row):
     return None
 
 
-def load_rows(split, limit, bench_file=None, sft_file=None):
+def load_rows(split, limit, bench_file=None, sft_file=None, spec=None, sample=None, seed=0):
     if bench_file:
         bench = [json.loads(l) for l in open(bench_file) if l.strip()]
         sft = [json.loads(l) for l in open(sft_file) if l.strip()]
@@ -99,9 +111,24 @@ def load_rows(split, limit, bench_file=None, sft_file=None):
         now = inp.get("now_unix", inp.get("now")) if isinstance(inp, dict) else None
         if now is not None and str(now) not in user:
             sys.exit(f"Row {b['id']}: sft prompt does not match benchmark input (now={now}); splits are misaligned.")
+        if spec is not None:
+            task = b.get("task", "risk_gate")
+            if task not in spec:
+                sys.exit(f"spec prompt has no section for task {task!r}")
+            system = system + spec[task]
         rows.append({"id": b["id"], "system": system, "user": user, "gold": b})
         if limit and len(rows) >= limit:
             break
+    if sample and sample < len(rows):
+        # Stratified by task so the payment/dispute mix matches the full test split.
+        rng, by_task = random.Random(seed), {}
+        for r in rows:
+            by_task.setdefault(r["gold"].get("task", "risk_gate"), []).append(r)
+        keep = set()
+        for task, group in by_task.items():
+            n = round(sample * len(group) / len(rows))
+            keep.update(r["id"] for r in rng.sample(group, n))
+        rows = [r for r in rows if r["id"] in keep]
     return rows
 
 
@@ -155,17 +182,32 @@ class TransformersBackend:
 
 
 class OpenAIBackend:
-    def __init__(self, model_id, base_url, api_key, max_new_tokens, workers, extra):
+    def __init__(self, model_id, base_url, api_key, max_new_tokens, workers, extra, temperature=True):
         self.model_id, self.url = model_id, base_url.rstrip("/") + "/chat/completions"
         self.key, self.max_new_tokens, self.workers, self.extra = api_key, max_new_tokens, workers, extra
+        self.temperature = temperature
+        self.openrouter = "openrouter.ai" in base_url
         self.dtype = "api"
-        self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.0}
+        self.finish = Counter()   # finish_reason per row: 'length' means the output budget ran out
+        self.failed = 0           # rows that still failed after all retries (scored as invalid)
         self.lock = threading.Lock()
 
+    @staticmethod
+    def _text(message):
+        c = message.get("content")
+        if isinstance(c, list):  # some providers return content parts
+            c = "".join(p.get("text", "") for p in c if isinstance(p, dict))
+        return c or ""
+
     def _one(self, r):
-        body = {"model": self.model_id, "temperature": 0, "max_tokens": self.max_new_tokens,
-                "messages": [{"role": "system", "content": r["system"]}, {"role": "user", "content": r["user"]}],
-                **self.extra}
+        body = {"model": self.model_id, "max_tokens": self.max_new_tokens,
+                "messages": [{"role": "system", "content": r["system"]}, {"role": "user", "content": r["user"]}]}
+        if self.temperature:
+            body["temperature"] = 0
+        if self.openrouter:
+            body["usage"] = {"include": True}  # OpenRouter reports the cost of each call
+        body.update(self.extra)
         data = json.dumps(body).encode()
         for attempt in range(7):
             try:
@@ -174,16 +216,25 @@ class OpenAIBackend:
                 with urllib.request.urlopen(req, timeout=300) as resp:
                     j = json.load(resp)
                 u = j.get("usage") or {}
+                choice = j["choices"][0]
                 with self.lock:
-                    self.usage["prompt_tokens"] += u.get("prompt_tokens", 0)
-                    self.usage["completion_tokens"] += u.get("completion_tokens", 0)
-                return (j["choices"][0]["message"].get("content") or "")
+                    self.usage["prompt_tokens"] += u.get("prompt_tokens") or 0
+                    self.usage["completion_tokens"] += u.get("completion_tokens") or 0
+                    self.usage["reasoning_tokens"] += (u.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
+                    self.usage["cost_usd"] += float(u.get("cost") or 0)
+                    self.finish[choice.get("finish_reason") or "unknown"] += 1
+                return self._text(choice.get("message") or {})
             except urllib.error.HTTPError as e:
                 if e.code in (400, 401, 403, 404):  # not retryable: bad model id, key, or request
-                    raise SystemExit(f"API error {e.code}: {e.read().decode()[:500]}")
+                    msg = e.read().decode()[:500]
+                    hint = (" (if it mentions temperature, rerun with --no-temperature and a new --name)"
+                            if e.code == 400 and self.temperature and "temperature" in msg.lower() else "")
+                    raise SystemExit(f"API error {e.code}: {msg}{hint}")
                 time.sleep(min(60, 2 ** attempt))
             except Exception:
                 time.sleep(min(60, 2 ** attempt))
+        with self.lock:
+            self.failed += 1
         return ""  # recorded as an empty prediction -> scored as invalid, never dropped
 
     def run(self, rows, on_result):
@@ -204,7 +255,17 @@ def main():
     ap.add_argument("--extra-json", default="{}", help='extra API body fields, e.g. \'{"reasoning": {"enabled": false}}\'')
     ap.add_argument("--workers", type=int, default=8, help="parallel API requests (openai backend)")
     ap.add_argument("--batch-size", type=int, default=8, help="prompts per GPU batch (transformers backend)")
-    ap.add_argument("--max-new-tokens", type=int, default=512)
+    ap.add_argument("--max-new-tokens", type=int, default=512,
+                    help="output budget; reasoning models count their thinking here, so give them 4096-16384")
+    ap.add_argument("--prompt-variant", choices=["training", "spec"], default="training")
+    ap.add_argument("--spec-file", default=str(Path(__file__).with_name("spec_prompt.json")))
+    ap.add_argument("--reasoning", choices=["default", "off", "low", "medium", "high"], default="default",
+                    help="OpenRouter reasoning setting (openai backend); recorded in run_config.json")
+    ap.add_argument("--no-temperature", action="store_true",
+                    help="omit temperature (some reasoning models reject temperature=0)")
+    ap.add_argument("--sample", type=int, help="stratified random subset of N rows (cheaper; not comparable "
+                                                  "to full-split numbers)")
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--split", default="test")
     ap.add_argument("--limit", type=int, help="only the first N rows (smoke test / cost check)")
     ap.add_argument("--score-script", default="score.py")
@@ -217,7 +278,26 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     pred_path, gold_path = out / "predictions.jsonl", out / "test.jsonl"
 
-    rows = load_rows(args.split, args.limit, args.bench_file, args.sft_file)
+    spec = None
+    if args.prompt_variant == "spec":
+        spec = {k: v for k, v in json.load(open(args.spec_file)).items() if not k.startswith("_")}
+    extra = json.loads(args.extra_json)
+    if args.reasoning == "off":
+        extra.setdefault("reasoning", {"enabled": False})
+    elif args.reasoning != "default":
+        extra.setdefault("reasoning", {"effort": args.reasoning, "exclude": True})
+
+    # Refuse to resume into a folder made with different settings (it would mix two runs).
+    meta = {"model": args.model, "prompt_variant": args.prompt_variant, "split": args.split,
+            "sample": args.sample, "seed": args.seed if args.sample else None, "limit": args.limit,
+            "max_new_tokens": args.max_new_tokens, "reasoning": args.reasoning,
+            "temperature": None if args.no_temperature else 0, "extra": extra}
+    meta_path = out / "run_meta.json"
+    if meta_path.exists() and json.load(meta_path.open()) != meta:
+        sys.exit(f"{out} was started with different settings ({meta_path}); use a new --name.")
+    json.dump(meta, meta_path.open("w"), indent=2)
+
+    rows = load_rows(args.split, args.limit, args.bench_file, args.sft_file, spec, args.sample, args.seed)
     with gold_path.open("w") as f:
         for r in rows:
             f.write(json.dumps(r["gold"]) + "\n")
@@ -236,7 +316,7 @@ def main():
             if not key:
                 sys.exit(f"Set the {args.api_key_env} environment variable first.")
             backend = OpenAIBackend(args.model, args.base_url, key, args.max_new_tokens, args.workers,
-                                    json.loads(args.extra_json))
+                                    extra, temperature=not args.no_temperature)
         lock, count, t0 = threading.Lock(), [0], time.time()
         with pred_path.open("a") as f:
             def on_result(rid, text):
@@ -248,12 +328,29 @@ def main():
                         el = time.time() - t0
                         print(f"  {count[0]}/{len(todo)}  ({el / count[0]:.2f}s/row, ~{el / count[0] * (len(todo) - count[0]) / 60:.0f} min left)", flush=True)
             backend.run(todo, on_result)
+        prompts = ("exact training prompts from the sft split" if args.prompt_variant == "training" else
+                   "training prompts + published spec (labels and decision rules, eval/spec_prompt.json)")
         cfg = {"name": args.name, "model": args.model, "backend": args.backend, "split": args.split,
-               "rows": len(rows), "decoding": "greedy / temperature 0", "max_new_tokens": args.max_new_tokens,
-               "dtype": str(backend.dtype), "prompts": "exact training prompts from the sft split",
-               "extra": json.loads(args.extra_json), "seconds": round(time.time() - t0)}
+               "rows": len(rows), "sample": args.sample, "seed": args.seed if args.sample else None,
+               "prompt_variant": args.prompt_variant, "prompts": prompts,
+               "decoding": "greedy / temperature 0" if not args.no_temperature else "provider default temperature",
+               "reasoning": args.reasoning, "max_new_tokens": args.max_new_tokens,
+               "dtype": str(backend.dtype), "extra": extra, "seconds": round(time.time() - t0)}
+        prev = json.load((out / "run_config.json").open()) if (out / "run_config.json").exists() else {}
+        cfg["seconds"] += prev.get("seconds", 0)          # resumed runs add up, never overwrite
         if isinstance(backend, OpenAIBackend):
-            cfg["usage"] = backend.usage
+            usage = dict(backend.usage)
+            for k, v in (prev.get("usage") or {}).items():
+                usage[k] = usage.get(k, 0) + v
+            usage["cost_usd"] = round(usage["cost_usd"], 4)
+            finish = Counter(prev.get("finish_reasons") or {})
+            finish.update(backend.finish)
+            backend.finish = finish
+            cfg["usage"], cfg["finish_reasons"] = usage, dict(finish)
+            cfg["failed_after_retries"] = backend.failed + prev.get("failed_after_retries", 0)
+            if backend.finish.get("length"):
+                print(f"WARNING: {backend.finish['length']} rows hit the output budget (finish_reason=length). "
+                      "Raise --max-new-tokens or lower --reasoning, and rerun with a new --name.", flush=True)
         json.dump(cfg, (out / "run_config.json").open("w"), indent=2)
 
     if not Path(args.score_script).exists():

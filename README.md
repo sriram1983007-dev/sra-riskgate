@@ -56,10 +56,11 @@ Only pay on `approve`.
 |---|---|---|
 | Sender or recipient is on the OFAC SDN list (bundled snapshot) | reject | `OFAC_SDN_MATCH` |
 | Token is not USDC, or chain is not Ethereum, Base or Base Sepolia | hold | `UNSUPPORTED_ASSET` / `UNSUPPORTED_CHAIN` |
-| Malformed, zero or self address; amount ≤ 0, NaN or infinite | reject | `INVALID_PAYMENT` |
+| Malformed, zero or self address; amount ≤ 0, NaN, infinite or below 0.000001 USDC | reject | `INVALID_PAYMENT` |
 | Invalid thresholds | reject | `CONFIGURATION_ERROR` |
 | Rules (see below) | approve / hold / reject | rule flags |
 | Request text claims its own verification | hold | `self_asserted_verification_in_payload` |
+| Whole-number amount of 10,000 USDC or more | unchanged (informational) | `ROUND_AMOUNT` |
 | Any other error | hold | `CHECK_FAILED` |
 
 **Using a coding agent?** The [agent-payment-guard](https://github.com/sriram1983007-dev/agent-payment-guard)

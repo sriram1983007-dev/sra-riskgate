@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.2
+- New informational flag `ROUND_AMOUNT`: a whole-number amount at or above 10,000 USDC is flagged.
+  Large round-number transfers are a common transaction-monitoring signal; the 10,000 default mirrors
+  the US currency transaction report threshold for cash (CTRs themselves do not apply to stablecoin
+  transfers).
+- **It never changes the decision.** An approve stays approve and a hold stays hold; the explanation says
+  the flag is informational and that many such payments (payroll, settlements) are legitimate.
+- Configure with `RulePreFilter(round_amount_threshold=...)`, or pass `None` to turn it off.
+- Because `check_payment`'s default ceiling is 1,000 USDC, the flag appears there only alongside
+  `HIGH_VALUE_TRANSFER` unless you raise `max_amount`. `RulePreFilter`'s default ceiling is 50,000, so
+  round amounts from 10,000 to 50,000 now approve with the flag instead of with no flags.
+- README: the decision table now lists the dust rule (below 0.000001 USDC) and the round-amount flag.
+- Suggested by an external review.
+
 ## 0.7.1
 - Fix: a USDC amount below one atomic unit (0.000001 USDC) is now rejected with `INVALID_PAYMENT`
   ("below the smallest USDC unit"). Such an amount rounds to zero on-chain and can never execute, but

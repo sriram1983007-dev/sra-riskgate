@@ -1,8 +1,17 @@
 import math
+from decimal import Decimal
 from typing import Optional
 
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
 from sra_riskgate.sanctions import FLAG as SANCTIONS_FLAG, NOT_CHECKED_FLAG, SanctionsList
+
+ROUND_AMOUNT_FLAG = "ROUND_AMOUNT"
+DEFAULT_ROUND_AMOUNT_THRESHOLD = 10_000.0
+
+
+def _is_whole(amount: float) -> bool:
+    d = Decimal(str(amount))
+    return d.is_finite() and d == d.to_integral_value()
 
 # Legacy keyword names accepted for backwards compatibility.
 # In 0.1.x, `max_allowed_deviation_pct` was the HOLD threshold (reject was fixed at 5%).
@@ -23,6 +32,10 @@ class RulePreFilter:
     Sanctions: by default sender and recipient are matched against the bundled OFAC SDN snapshot
     (see ``sra_riskgate.sanctions``); a match is a REJECT. Pass ``sanctions_list`` to use a fresher
     list, or ``check_sanctions=False`` to turn the match off (results then carry SANCTIONS_NOT_CHECKED).
+
+    Round amounts: a whole-number amount at or above ``round_amount_threshold`` (default 10,000 USDC)
+    adds the informational flag ROUND_AMOUNT. It never changes the decision. Pass
+    ``round_amount_threshold=None`` to turn it off.
     """
 
     def __init__(
@@ -33,13 +46,15 @@ class RulePreFilter:
         *,
         check_sanctions: bool = True,
         sanctions_list: Optional[SanctionsList] = None,
+        round_amount_threshold: Optional[float] = DEFAULT_ROUND_AMOUNT_THRESHOLD,
         **kwargs,
     ):
         unknown = set(kwargs) - _LEGACY_KWARGS
         if unknown:
             raise TypeError(
                 f"Unknown argument(s): {', '.join(sorted(unknown))}. "
-                "Valid arguments: max_amount, depeg_hold_pct, depeg_reject_pct, check_sanctions, sanctions_list."
+                "Valid arguments: max_amount, depeg_hold_pct, depeg_reject_pct, check_sanctions, sanctions_list, "
+                "round_amount_threshold."
             )
 
         if "max_amount_usdc" in kwargs:
@@ -65,6 +80,12 @@ class RulePreFilter:
             raise ValueError(f"check_sanctions must be True or False, got {check_sanctions!r}.")
         if sanctions_list is not None and not isinstance(sanctions_list, SanctionsList):
             raise ValueError("sanctions_list must be a SanctionsList (see SanctionsList.from_file).")
+        if round_amount_threshold is not None and (
+                isinstance(round_amount_threshold, bool) or not isinstance(round_amount_threshold, (int, float))
+                or not math.isfinite(round_amount_threshold) or round_amount_threshold <= 0):
+            raise ValueError("round_amount_threshold must be a positive finite number or None, "
+                             f"got {round_amount_threshold!r}.")
+        self.round_amount_threshold = None if round_amount_threshold is None else float(round_amount_threshold)
         self.check_sanctions = check_sanctions
         self._sanctions_list = sanctions_list
 
@@ -132,6 +153,16 @@ class RulePreFilter:
         if payload.amount > self.max_amount:
             flags.append("HIGH_VALUE_TRANSFER")
             reasons.append(f"Transfer amount {payload.amount} exceeds single-transaction ceiling {self.max_amount}.")
+        round_note = ""
+        if (self.round_amount_threshold is not None and payload.amount >= self.round_amount_threshold
+                and _is_whole(payload.amount)):
+            # Informational only: it never changes the decision (see `notes` below).
+            flags.append(ROUND_AMOUNT_FLAG)
+            round_note = (f"Round amount of {payload.amount:g} USDC (a whole number at or above "
+                          f"{self.round_amount_threshold:g}): large round-number transfers are a common "
+                          "transaction-monitoring signal. Informational only; many such payments, such as "
+                          "payroll or settlements, are legitimate.")
+            reasons.append(round_note)
 
         if not payload.peg_observed:
             # No peg data is not the same as a perfect peg: say so explicitly.
@@ -141,7 +172,7 @@ class RulePreFilter:
             flags.append(NOT_CHECKED_FLAG)
             reasons.append("Sanctions matching is turned off for this gate.")
 
-        notes = ("PEG_NOT_CHECKED", NOT_CHECKED_FLAG)
+        notes = ("PEG_NOT_CHECKED", NOT_CHECKED_FLAG, ROUND_AMOUNT_FLAG)
         if any(f not in notes for f in flags):
             return RiskAssessment(
                 decision=ActionDecision.HOLD,
@@ -157,7 +188,8 @@ class RulePreFilter:
             flags=flags,
             explanation="Transaction conforms to standard deterministic pre-filter policies."
                         + ("" if payload.peg_observed else " Depeg check skipped: no peg data supplied.")
-                        + ("" if self.check_sanctions else " Sanctions matching is turned off."),
+                        + ("" if self.check_sanctions else " Sanctions matching is turned off.")
+                        + (f" {round_note}" if round_note else ""),
             required_actions=[],
         )
 

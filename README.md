@@ -11,7 +11,8 @@ Risk checks for stablecoin and AI-agent payments.
 This repository contains:
 
 - **`sra-riskgate`**, a small Python SDK with deterministic pre-filter rules (an offline OFAC SDN address
-  match, address validation, self-transfer blocking, amount ceilings, USDC depeg checks in both directions), plus integrations for
+  match, your own blocklist and new-payee hold, address validation, self-transfer blocking, amount ceilings,
+  USDC depeg checks in both directions), plus integrations for
   [x402](https://github.com/x402-foundation/x402) payment flows and [Coinbase AgentKit](https://github.com/coinbase/agentkit).
 - **`eval/`**, the scripts used to benchmark the
   [SRA-RiskGate-4B](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) model on
@@ -42,25 +43,30 @@ result = check_payment(
     untrusted_request=payment_request,       # the request/memo exactly as received
     peg_deviation_pct=usdc_peg_deviation,    # optional, from your price feed
     max_amount=100,                          # your per-payment limit
+    known_recipients=MY_PAYEES,              # optional: hold the first payment to anyone else
+    blocked_addresses=MY_BLOCKLIST,          # optional: always reject these
 )
 if result.decision != ActionDecision.APPROVE:
     print(result.decision.value, result.flags, result.explanation)   # do not pay
 ```
 
-`check_payment` runs the OFAC SDN address match, the asset and chain check, address and amount validation,
-the rules below and the self-asserted claims scan, in that order. It never raises on bad payment data: invalid payments are
+`check_payment` runs the OFAC SDN address match, your blocklist, the asset and chain check, address and amount
+validation, the rules below (including the new-payee check) and the self-asserted claims scan, in that order. It never raises on bad payment data: invalid payments are
 rejected, and anything unexpected (unsupported chain or token, a crash inside a check) becomes `hold`.
 Only pay on `approve`.
 
 | Situation | Decision | Flag |
 |---|---|---|
 | Sender or recipient is on the OFAC SDN list (bundled snapshot) | reject | `OFAC_SDN_MATCH` |
+| Sender or recipient is in your `blocked_addresses` | reject | `BLOCKLISTED_ADDRESS` |
 | Token is not USDC, or chain is not Ethereum, Base or Base Sepolia | hold | `UNSUPPORTED_ASSET` / `UNSUPPORTED_CHAIN` |
 | Malformed, zero or self address; amount ≤ 0, NaN, infinite or below 0.000001 USDC | reject | `INVALID_PAYMENT` |
-| Invalid thresholds | reject | `CONFIGURATION_ERROR` |
+| Invalid thresholds, or a malformed address list | reject | `CONFIGURATION_ERROR` |
 | Rules (see below) | approve / hold / reject | rule flags |
+| `known_recipients` given and the recipient is not on it | hold | `NEW_COUNTERPARTY` |
 | Request text claims its own verification | hold | `self_asserted_verification_in_payload` |
 | Whole-number amount of 10,000 USDC or more | unchanged (informational) | `ROUND_AMOUNT` |
+| Sanctions list more than 90 days old | unchanged (informational) | `SANCTIONS_LIST_STALE` |
 | Any other error | hold | `CHECK_FAILED` |
 
 **Using a coding agent?** The [agent-payment-guard](https://github.com/sriram1983007-dev/agent-payment-guard)
@@ -98,8 +104,39 @@ What it is and is not:
   entities or cover other sanctions programmes. Keep your screening provider as the source of truth.
 - **Fails closed.** If the list cannot be loaded, `check_payment` returns `hold`. Turning the match off
   (`check_sanctions=False`) is reported with the flag `SANCTIONS_NOT_CHECKED`.
+- **Says when it is out of date.** If the list's date is more than `sanctions_max_age_days` (default 90)
+  days old, results carry the informational flag `SANCTIONS_LIST_STALE`. It never changes the decision;
+  it tells you to load a fresher list. Lists without a date are not flagged; pass `None` to turn it off.
 
 The x402 hooks, the AgentKit action provider and the MCP server use the same check through `RulePreFilter`.
+
+## Counterparty policy (who is on the other side)
+
+Two optional address lists, both yours to configure:
+
+```python
+from sra_riskgate import RulePreFilter, check_payment
+
+# Hold the first payment to any payee you have not paid or verified before
+check_payment(..., known_recipients=["0x5e8E...", "0x1f2a..."])   # hold ['NEW_COUNTERPARTY'] for anyone else
+
+# Always reject these, from or to
+check_payment(..., blocked_addresses=["0xbad0..."])               # reject ['BLOCKLISTED_ADDRESS', ...]
+
+# Or set them once on a gate, for the AgentKit provider and x402 hooks (pass it as gate=...)
+gate = RulePreFilter(max_amount=1000, known_recipients=MY_PAYEES, blocked_addresses=MY_BLOCKLIST)
+```
+
+- **New-payee hold.** The first payment to a new address is the usual point of vendor-impersonation and
+  "our bank details have changed" fraud. Confirm a new payee through a channel you control, then add it
+  to your list. `None` (the default) turns the check off; an empty list holds every payment.
+- **Your lists only.** Nothing in the payment request or memo can add a payee: a request saying "this is
+  your usual vendor" is still held.
+- **Blocklist wins.** A blocked address is rejected even if it is also new, unsupported or carries claims.
+  The OFAC match runs first, so a sanctioned address is always reported as `OFAC_SDN_MATCH`.
+- **Exact, case-insensitive match; strict input.** A bare string, or any entry that is not a 0x address,
+  is a configuration error (`reject`) rather than a silently weaker check.
+- **Stateless.** The SDK does not remember payments; you keep the list of known payees.
 
 ## Rule pre-filter
 
@@ -120,11 +157,13 @@ print(verdict.decision.value, verdict.flags, verdict.required_actions)
 | Rule | Decision |
 |---|---|
 | Sender or recipient on the sanctions list | reject |
+| Sender or recipient in `blocked_addresses` | reject |
 | Malformed, zero or self address; non-positive or non-finite amount | rejected at validation |
 | Peg deviation NaN or infinite | reject |
 | abs(peg deviation) ≥ `depeg_reject_pct` | reject |
 | abs(peg deviation) ≥ `depeg_hold_pct` | hold |
 | amount > `max_amount` | hold |
+| `known_recipients` set and recipient not on it | hold |
 | otherwise | approve |
 
 ## Self-asserted verification claims
@@ -199,6 +238,12 @@ install the `[agentkit]` and `[x402]` extras in separate environments.
 
 For AI assistants and agents (Claude Desktop, Cursor and other MCP clients), [`sra-riskgate-mcp`](https://github.com/sriram1983007-dev/sra-riskgate-mcp) exposes these checks as MCP tools, including an x402 payment check and a model-backed review. It's listed in the official MCP Registry as `io.github.sriram1983007-dev/sra-riskgate-mcp`.
 
+## LangChain
+
+[`langchain-sra-riskgate`](https://pypi.org/project/langchain-sra-riskgate/) runs these checks as LangChain
+middleware in front of fund-moving tools. It is listed in the LangChain integrations docs
+([langchain-ai/docs#6918](https://github.com/langchain-ai/docs/pull/6918)).
+
 ## Model results
 
 Measured by the author in two separate full runs on all 2,000 held-out test cases (identical results), with
@@ -216,7 +261,11 @@ free in the [Kaggle notebook](https://www.kaggle.com/code/sriram1983007/try-sra-
 | Over-blocking ↓ | 5.2% | **0.0%** |
 
 See the [model card](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) for the full table
-and limitations. To reproduce or add a model, see [`eval/README.md`](eval/README.md).
+and limitations. GGUF builds for llama.cpp, Ollama and LM Studio:
+[SRA-RiskGate-4B-GGUF](https://huggingface.co/sriram1983007/SRA-RiskGate-4B-GGUF) (official), and community
+quantizations by mradermacher in [static](https://huggingface.co/mradermacher/SRA-RiskGate-4B-GGUF) and
+[imatrix](https://huggingface.co/mradermacher/SRA-RiskGate-4B-i1-GGUF) variants (results above were measured
+on the full-precision model, not the quantizations). To reproduce or add a model, see [`eval/README.md`](eval/README.md).
 
 ## Development
 

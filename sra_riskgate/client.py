@@ -1,12 +1,28 @@
 import math
+from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Iterable, Optional
 
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
-from sra_riskgate.sanctions import FLAG as SANCTIONS_FLAG, NOT_CHECKED_FLAG, SanctionsList
+from sra_riskgate.counterparty import BLOCKLIST_FLAG, NEW_COUNTERPARTY_FLAG, merge, parse_address_list
+from sra_riskgate.sanctions import FLAG as SANCTIONS_FLAG, NOT_CHECKED_FLAG, SanctionsList, _normalise
 
 ROUND_AMOUNT_FLAG = "ROUND_AMOUNT"
 DEFAULT_ROUND_AMOUNT_THRESHOLD = 10_000.0
+STALE_SANCTIONS_FLAG = "SANCTIONS_LIST_STALE"
+DEFAULT_SANCTIONS_MAX_AGE_DAYS = 90
+
+
+def _today() -> date:
+    """Today's date. A separate function so tests can replace it."""
+    return date.today()
+
+
+def _parse_as_of(as_of: object) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(as_of))
+    except ValueError:
+        return None
 
 
 def _is_whole(amount: float) -> bool:
@@ -36,6 +52,15 @@ class RulePreFilter:
     Round amounts: a whole-number amount at or above ``round_amount_threshold`` (default 10,000 USDC)
     adds the informational flag ROUND_AMOUNT. It never changes the decision. Pass
     ``round_amount_threshold=None`` to turn it off.
+
+    Counterparty policy (see ``sra_riskgate.counterparty``): ``blocked_addresses`` makes any payment
+    from or to a listed address a REJECT (BLOCKLISTED_ADDRESS). ``known_recipients``, when given,
+    makes a payment to any other recipient a HOLD (NEW_COUNTERPARTY). Both default to None (off);
+    an empty ``known_recipients`` holds every payment.
+
+    Sanctions-list age: if the list's ``as_of`` date is more than ``sanctions_max_age_days`` (default
+    90) days old, results carry the informational flag SANCTIONS_LIST_STALE. It never changes the
+    decision. Lists with no parseable ``as_of`` date are not flagged. Pass None to turn it off.
     """
 
     def __init__(
@@ -47,6 +72,9 @@ class RulePreFilter:
         check_sanctions: bool = True,
         sanctions_list: Optional[SanctionsList] = None,
         round_amount_threshold: Optional[float] = DEFAULT_ROUND_AMOUNT_THRESHOLD,
+        blocked_addresses: Optional[Iterable[str]] = None,
+        known_recipients: Optional[Iterable[str]] = None,
+        sanctions_max_age_days: Optional[int] = DEFAULT_SANCTIONS_MAX_AGE_DAYS,
         **kwargs,
     ):
         unknown = set(kwargs) - _LEGACY_KWARGS
@@ -54,7 +82,7 @@ class RulePreFilter:
             raise TypeError(
                 f"Unknown argument(s): {', '.join(sorted(unknown))}. "
                 "Valid arguments: max_amount, depeg_hold_pct, depeg_reject_pct, check_sanctions, sanctions_list, "
-                "round_amount_threshold."
+                "round_amount_threshold, blocked_addresses, known_recipients, sanctions_max_age_days."
             )
 
         if "max_amount_usdc" in kwargs:
@@ -86,6 +114,14 @@ class RulePreFilter:
             raise ValueError("round_amount_threshold must be a positive finite number or None, "
                              f"got {round_amount_threshold!r}.")
         self.round_amount_threshold = None if round_amount_threshold is None else float(round_amount_threshold)
+        if sanctions_max_age_days is not None and (
+                isinstance(sanctions_max_age_days, bool) or not isinstance(sanctions_max_age_days, int)
+                or sanctions_max_age_days <= 0):
+            raise ValueError("sanctions_max_age_days must be a positive whole number of days or None, "
+                             f"got {sanctions_max_age_days!r}.")
+        self.sanctions_max_age_days = sanctions_max_age_days
+        self.blocked_addresses = parse_address_list("blocked_addresses", blocked_addresses)
+        self.known_recipients = parse_address_list("known_recipients", known_recipients)
         self.check_sanctions = check_sanctions
         self._sanctions_list = sanctions_list
 
@@ -119,10 +155,45 @@ class RulePreFilter:
             required_actions=["reject_payment", "refer_to_compliance"],
         )
 
-    def inspect(self, payload: TransactionPayload) -> RiskAssessment:
+    def screen_blocklist(self, sender: object, recipient: object,
+                         blocked_addresses: Optional[Iterable[str]] = None) -> Optional[RiskAssessment]:
+        """A REJECT if sender or recipient is on this gate's or the given blocklist, else None."""
+        blocked = merge(self.blocked_addresses, parse_address_list("blocked_addresses", blocked_addresses))
+        if not blocked:
+            return None
+        hits = []
+        for party, addr in (("recipient", recipient), ("sender", sender)):
+            n = _normalise(addr)
+            if n is not None and n in blocked:
+                hits.append((party, n))
+        if not hits:
+            return None
+        who = " and ".join(f"{party} {addr}" for party, addr in hits)
+        return RiskAssessment(
+            decision=ActionDecision.REJECT,
+            risk_score=1.0,
+            flags=[BLOCKLIST_FLAG] + [f"BLOCKLISTED_{party.upper()}" for party, _ in hits],
+            explanation=f"The {who} is on your blocked_addresses list. Do not pay.",
+            required_actions=["reject_payment"],
+        )
+
+    def sanctions_list_age_days(self) -> Optional[int]:
+        """Days since the sanctions list's as_of date, or None if matching is off or the date is unknown."""
+        lst = self.sanctions_list
+        as_of = _parse_as_of(lst.as_of) if lst is not None else None
+        return None if as_of is None else (_today() - as_of).days
+
+    def inspect(self, payload: TransactionPayload, *,
+                known_recipients: Optional[Iterable[str]] = None,
+                blocked_addresses: Optional[Iterable[str]] = None) -> RiskAssessment:
+        """Apply the rules. ``known_recipients`` and ``blocked_addresses`` add to this gate's own lists."""
         sanctioned = self.screen_sanctions(payload.sender, payload.recipient)
         if sanctioned is not None:
             return sanctioned
+        blocked = self.screen_blocklist(payload.sender, payload.recipient, blocked_addresses)
+        if blocked is not None:
+            return blocked
+        known = merge(self.known_recipients, parse_address_list("known_recipients", known_recipients))
 
         peg_dev = payload.peg_deviation_pct if payload.peg_deviation_pct is not None else 0.0
 
@@ -164,6 +235,19 @@ class RulePreFilter:
                           "payroll or settlements, are legitimate.")
             reasons.append(round_note)
 
+        if known is not None and payload.recipient.lower() not in known:
+            flags.append(NEW_COUNTERPARTY_FLAG)
+            reasons.append(f"First payment to {payload.recipient}: it is not in known_recipients. Confirm the "
+                           "payee through a channel you control, not the payment request, before adding it.")
+        age = self.sanctions_list_age_days() if self.sanctions_max_age_days is not None else None
+        stale_note = ""
+        if age is not None and age > self.sanctions_max_age_days:
+            # Informational only: it never changes the decision (see `notes` below).
+            flags.append(STALE_SANCTIONS_FLAG)
+            stale_note = (f"The sanctions list is {age} days old (as of {self.sanctions_list.as_of}); "
+                          "addresses designated since then are not matched. Load a fresher list.")
+            reasons.append(stale_note)
+
         if not payload.peg_observed:
             # No peg data is not the same as a perfect peg: say so explicitly.
             flags.append("PEG_NOT_CHECKED")
@@ -172,7 +256,7 @@ class RulePreFilter:
             flags.append(NOT_CHECKED_FLAG)
             reasons.append("Sanctions matching is turned off for this gate.")
 
-        notes = ("PEG_NOT_CHECKED", NOT_CHECKED_FLAG, ROUND_AMOUNT_FLAG)
+        notes = ("PEG_NOT_CHECKED", NOT_CHECKED_FLAG, ROUND_AMOUNT_FLAG, STALE_SANCTIONS_FLAG)
         if any(f not in notes for f in flags):
             return RiskAssessment(
                 decision=ActionDecision.HOLD,
@@ -189,7 +273,8 @@ class RulePreFilter:
             explanation="Transaction conforms to standard deterministic pre-filter policies."
                         + ("" if payload.peg_observed else " Depeg check skipped: no peg data supplied.")
                         + ("" if self.check_sanctions else " Sanctions matching is turned off.")
-                        + (f" {round_note}" if round_note else ""),
+                        + (f" {round_note}" if round_note else "")
+                        + (f" {stale_note}" if stale_note else ""),
             required_actions=[],
         )
 

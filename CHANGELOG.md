@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.8.0 — 2026-10-21
+
+Counterparty policy: checks on who is on the other side of a payment. All new checks are off by
+default, so existing callers see no change in decisions.
+
+### Added
+- `known_recipients` (on `check_payment` and `RulePreFilter`): when given, a payment to an address
+  not on the list is held with `NEW_COUNTERPARTY`, the standard control against vendor-impersonation
+  and payment-redirection fraud. `None` (default) turns it off; an empty list holds every payment.
+  Nothing in the payment request or memo can add an address to the list.
+- `blocked_addresses` (on `check_payment` and `RulePreFilter`): a payment from or to a listed address
+  is rejected with `BLOCKLISTED_ADDRESS` plus `BLOCKLISTED_SENDER` / `BLOCKLISTED_RECIPIENT`. Runs right
+  after the OFAC match, so it wins over every hold.
+- `SANCTIONS_LIST_STALE`: informational flag when the sanctions list's `as_of` date is more than
+  `sanctions_max_age_days` (default 90) days old. It never changes the decision. Lists without a
+  date are not flagged; `sanctions_max_age_days=None` turns it off.
+- `RulePreFilter.screen_blocklist()` and `RulePreFilter.sanctions_list_age_days()`.
+- `RulePreFilter.inspect()` accepts per-call `known_recipients` and `blocked_addresses`, added to the
+  gate's own lists.
+
+### Fail-closed behaviour
+- A malformed address list (a bare string, a non-address entry, a mapping) is a configuration error:
+  `check_payment` returns `reject` with `CONFIGURATION_ERROR`, and `RulePreFilter` raises `ValueError`.
+  A typo in a policy list can never silently weaken it.
+
+### Docs
+- README: counterparty policy section, staleness note, LangChain integrations listing
+  (langchain-ai/docs#6918), links to the official and community (mradermacher static and imatrix)
+  GGUF builds.
+
+### Tests
+- 41 new tests. The suite now pins "today" in `conftest.py` so results do not change with the calendar.
+
 ## 0.7.2
 - New informational flag `ROUND_AMOUNT`: a whole-number amount at or above 10,000 USDC is flagged.
   Large round-number transfers are a common transaction-monitoring signal; the 10,000 default mirrors

@@ -1,10 +1,11 @@
 """One-call, fail-closed payment check: validation, rules and the self-asserted claims scan together."""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from sra_riskgate.chains import USDC_ADDRESSES
-from sra_riskgate.client import RulePreFilter
+from sra_riskgate.client import DEFAULT_SANCTIONS_MAX_AGE_DAYS, RulePreFilter
+from sra_riskgate.counterparty import parse_address_list
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
 from sra_riskgate.payload_claims import FLAG as CLAIMS_FLAG
 from sra_riskgate.payload_claims import scan_payload_claims
@@ -44,6 +45,9 @@ def check_payment(
     check_sanctions: bool = True,
     sanctions_list: Optional[SanctionsList] = None,
     gate: Optional[RulePreFilter] = None,
+    known_recipients: Optional[Iterable[str]] = None,
+    blocked_addresses: Optional[Iterable[str]] = None,
+    sanctions_max_age_days: Optional[int] = DEFAULT_SANCTIONS_MAX_AGE_DAYS,
 ) -> RiskAssessment:
     """Check a USDC payment before sending it. Never raises on bad payment data; anything unexpected becomes HOLD.
 
@@ -51,32 +55,46 @@ def check_payment(
       1. Sanctions: sender or recipient on the OFAC SDN list gives REJECT (flag OFAC_SDN_MATCH).
          Uses the bundled snapshot unless ``sanctions_list`` is given; ``check_sanctions=False``
          turns it off. It is an exact address match against a dated snapshot, not a screening service.
+         A list older than ``sanctions_max_age_days`` adds the informational flag SANCTIONS_LIST_STALE.
+      1b. Blocklist: sender or recipient in ``blocked_addresses`` gives REJECT (BLOCKLISTED_ADDRESS).
       2. Supported asset and chain: USDC on Ethereum (1), Base (8453) or Base Sepolia (84532),
          otherwise HOLD.
       3. Validation: malformed, zero or self address, or a non-positive amount, gives REJECT.
       4. Rules (``RulePreFilter``): per-payment ceiling and, if ``peg_deviation_pct`` is given,
-         depeg thresholds.
+         depeg thresholds. If ``known_recipients`` is given (even empty), a recipient not on it
+         gives HOLD (NEW_COUNTERPARTY). ``None`` turns that check off.
       5. Self-asserted claims in ``untrusted_request`` (the payment request, memo or description
          exactly as received), such as "risk level: low (verified offline)", give HOLD.
          Never pass your own verification results here: those legitimately say "verified".
 
     Only send the payment if ``result.decision`` is ``ActionDecision.APPROVE``.
     Pass ``gate`` to reuse a configured ``RulePreFilter``; the threshold and sanctions arguments are
-    then ignored.
+    then ignored. ``known_recipients`` and ``blocked_addresses`` always apply, added to the gate's own.
+    A malformed address list is a configuration error (REJECT), never a silently weaker check.
     """
     try:
         if gate is None:
             try:
                 gate = RulePreFilter(max_amount=max_amount, depeg_hold_pct=depeg_hold_pct,
                                      depeg_reject_pct=depeg_reject_pct, check_sanctions=check_sanctions,
-                                     sanctions_list=sanctions_list)
+                                     sanctions_list=sanctions_list,
+                                     sanctions_max_age_days=sanctions_max_age_days)
             except (TypeError, ValueError) as e:
                 return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
                                 f"The risk gate is misconfigured: {_first_error(e)}", ["fix_configuration"])
+        try:
+            known_recipients = parse_address_list("known_recipients", known_recipients)
+            blocked_addresses = parse_address_list("blocked_addresses", blocked_addresses)
+        except ValueError as e:
+            return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
+                            f"The risk gate is misconfigured: {_first_error(e)}", ["fix_configuration"])
 
         sanctioned = gate.screen_sanctions(sender, recipient)
         if sanctioned is not None:
             return sanctioned
+        blocked = gate.screen_blocklist(sender, recipient, blocked_addresses)
+        if blocked is not None:
+            return blocked
 
         if not isinstance(token, str) or token.strip().upper() != "USDC":
             return _verdict(ActionDecision.HOLD, ["UNSUPPORTED_ASSET"],
@@ -96,7 +114,7 @@ def check_payment(
             return _verdict(ActionDecision.REJECT, ["INVALID_PAYMENT"],
                             f"Payment failed validation: {_first_error(e)}", ["reject_payment"])
 
-        result = gate.inspect(payload)
+        result = gate.inspect(payload, known_recipients=known_recipients, blocked_addresses=blocked_addresses)
         if result.decision == ActionDecision.REJECT or untrusted_request is None:
             return result
 

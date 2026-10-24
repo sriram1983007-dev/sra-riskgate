@@ -172,6 +172,30 @@ way agent wallets are drained, so it is never approved here. `decode_erc20_trans
 and the [GitHub Action](https://github.com/sriram1983007-dev/sra-riskgate-action) (`payload`) hold the
 same kinds of transaction, with less specific flags.
 
+## Dispute verdicts: check the window (0.10.0+)
+
+On the published benchmark, SRA-RiskGate-4B misjudges whether a dispute was filed inside the policy's
+window: when it says `outside_dispute_window`, it is wrong 81% of the time, and those false claims cause
+59 of its 61 wrongful denials. The window is date arithmetic, so check it in code:
+
+```python
+from sra_riskgate import check_dispute_verdict
+
+verdict = check_dispute_verdict(dispute, model_verdict)   # dispute in the model's input format
+```
+
+If the verdict claims the dispute is outside the window but the dates (`payload.payment.paid_at`,
+`payload.claim.filed_at`, `policy.dispute_window_days`) put it inside, the false flag is replaced by
+`dispute_window_claim_contradicted`, and a `deny` or `dismiss` becomes `escalate_to_human` with no refund.
+Nothing is ever turned into a refund. The result carries `dispute_window` (days since payment, window,
+within) for your logs; if the dates are missing it adds `dispute_window_not_checked` and changes nothing.
+`dispute_window(paid_at, filed_at, window_days)` gives the arithmetic on its own.
+
+On the 825 benchmark disputes, wrongful denials fall from 26.0% to 0.85%, wrongful refunds stay at 2.2%,
+and outcome accuracy rises from 77.8% to 78.7% (escalations count as misses). Reproduce it with
+`python eval/dispute_window_check.py test.jsonl predictions.jsonl` on the files in
+[sra-bench-results](https://huggingface.co/datasets/sriram1983007/sra-bench-results).
+
 ## Rule pre-filter
 
 ```python

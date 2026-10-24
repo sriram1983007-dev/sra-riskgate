@@ -138,6 +138,40 @@ gate = RulePreFilter(max_amount=1000, known_recipients=MY_PAYEES, blocked_addres
   is a configuration error (`reject`) rather than a silently weaker check.
 - **Stateless.** The SDK does not remember payments; you keep the list of known payees.
 
+## Check the exact transaction before signing (0.9.0+)
+
+`check_payment` checks a payment described in fields. An agent signs a **transaction**: a contract
+address, calldata and a native value. `check_transaction` decodes that transaction, sends a plain USDC
+`transfer` through `check_payment` with your policy, and holds everything else:
+
+```python
+from sra_riskgate import ActionDecision, check_transaction
+
+tx = {"to": USDC_BASE, "data": calldata, "value": 0, "from": MY_WALLET, "chainId": 8453}   # as for web3.py
+result = check_transaction(tx, known_recipients=MY_PAYEES, max_amount=500,
+                           untrusted_request=payment_request)
+if result.decision != ActionDecision.APPROVE:
+    print(result.decision.value, result.flags, result.explanation)   # do not sign
+```
+
+| Transaction | Decision | Flag |
+|---|---|---|
+| USDC `transfer(to, amount)`, no native value | as `check_payment` decides for that recipient and amount | its flags |
+| USDC `approve`, `increaseAllowance` or `permit` | hold | `TOKEN_APPROVAL` (plus `UNLIMITED_APPROVAL` for an unlimited amount) |
+| Any other USDC function (`transferFrom`, `transferWithAuthorization`, ...) | hold | `UNSUPPORTED_FUNCTION` |
+| `to` is not the USDC contract on that chain | hold | `UNSUPPORTED_ASSET` |
+| Moves native ETH (`value` > 0) | hold | `NATIVE_VALUE_TRANSFER` |
+| Chain not Ethereum, Base or Base Sepolia | hold | `UNSUPPORTED_CHAIN` |
+| `from` or `chainId` disagree with `sender` / `chain_id` | hold | `TRANSACTION_MISMATCH` |
+| Missing fields, malformed or wrong-length calldata | hold | `INVALID_TRANSACTION` |
+
+An approval lets another address spend the wallet's USDC later, without a further check: it is the usual
+way agent wallets are drained, so it is never approved here. `decode_erc20_transfer(calldata)` returns
+`(recipient, atomic_amount)`, or `None` for anything but a well-formed `transfer`. The
+[ElizaOS plugin](https://github.com/sriram1983007-dev/elizaos-plugin-sra-riskgate) (`guardWalletClient`)
+and the [GitHub Action](https://github.com/sriram1983007-dev/sra-riskgate-action) (`payload`) hold the
+same kinds of transaction, with less specific flags.
+
 ## Rule pre-filter
 
 ```python

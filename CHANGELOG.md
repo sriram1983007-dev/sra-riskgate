@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.0 — 2026-10-24
+
+### Added
+- `check_dispute_verdict(dispute, verdict)`: checks a dispute verdict against the dispute window computed
+  from the dispute's own dates. A false `outside_dispute_window` claim is replaced by
+  `dispute_window_claim_contradicted`, and a `deny` or `dismiss` resting on it becomes
+  `escalate_to_human` with no refund. Never produces a refund; never raises; returns a copy.
+- `dispute_window(paid_at, filed_at, window_days)` and `DisputeWindow`.
+- `eval/dispute_window_check.py` measures the check on the published predictions: wrongful denials
+  26.0% -> 0.85%, wrongful refunds unchanged at 2.2%, outcome accuracy 77.8% -> 78.7%.
+- `eval/profile_bench.py` profiles the dispute errors and checks train/test overlap (0 exact duplicates;
+  99.3% payment accuracy on test cases with no template twin in training).
+
+No change to `check_payment`, `check_transaction` or any existing decision.
+
 ## 0.9.0 — 2026-10-24
 
 ### Added

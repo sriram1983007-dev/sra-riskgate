@@ -212,7 +212,8 @@ class OpenAIBackend:
         for attempt in range(7):
             try:
                 req = urllib.request.Request(self.url, data=data, headers={
-                    "Content-Type": "application/json", "Authorization": f"Bearer {self.key}"})
+                    "Content-Type": "application/json", "Authorization": f"Bearer {self.key}",
+                    "User-Agent": "sra-riskgate-eval"})  # Runpod's proxy refuses Python-urllib with 403
                 with urllib.request.urlopen(req, timeout=300) as resp:
                     j = json.load(resp)
                 u = j.get("usage") or {}

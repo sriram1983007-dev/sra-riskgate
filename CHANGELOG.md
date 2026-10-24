@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.0 — 2026-10-24
+
+### Added
+- `check_transaction(tx, *, chain_id=None, sender=None, **policy)`: checks the exact transaction an
+  agent is about to sign (`to`, `data`/`input`, `value`, `from`, `chainId`, as for web3.py). A plain
+  USDC `transfer` is decoded and checked by `check_payment` with the same policy arguments. Everything
+  else is held: token approvals (`TOKEN_APPROVAL`, plus `UNLIMITED_APPROVAL`), other functions
+  (`UNSUPPORTED_FUNCTION`), other contracts (`UNSUPPORTED_ASSET`), native ETH (`NATIVE_VALUE_TRANSFER`),
+  unsupported chains, mismatched `from`/`chainId` (`TRANSACTION_MISMATCH`) and malformed calldata
+  (`INVALID_TRANSACTION`). It never raises; an unknown policy argument is `CONFIGURATION_ERROR`.
+- `decode_erc20_transfer(calldata)`: strict decoder for ERC-20 `transfer` calldata.
+
+No change to `check_payment` or any existing decision.
+
+### Development
+- `eval/run_eval.py` sends its own `User-Agent`, so benchmark runs against a vLLM Pod on Runpod are not
+  refused with HTTP 403 (the same fix as sra-riskgate-mcp 0.5.1).
+
 ## 0.8.0 — 2026-10-21
 
 Counterparty policy: checks on who is on the other side of a payment. All new checks are off by

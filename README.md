@@ -46,6 +46,8 @@ print(result.decision.value, result.flags)
 The payment is held, not paid: the request claims its own approval, and no USDC peg reading was supplied.
 Nothing needs a GPU, an API key or a network connection.
 
+Walkthrough with more examples: [Stop your AI agent from signing an unlimited USDC approval](https://dev.to/sriram1983007/stop-your-ai-agent-from-signing-an-unlimited-usdc-approval-10c0) (DEV.to).
+
 ## Install
 
 ```bash

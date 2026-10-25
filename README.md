@@ -196,6 +196,43 @@ way agent wallets are drained, so it is never approved here. `decode_erc20_trans
 and the [GitHub Action](https://github.com/sriram1983007-dev/sra-riskgate-action) (`payload`) hold the
 same kinds of transaction, with less specific flags.
 
+## Check an x402 signature before signing (0.11.0+)
+
+In x402's `exact` scheme the agent does not send a transaction: it signs an EIP-3009
+`TransferWithAuthorization` message, and anyone holding that signature can move the USDC until it expires.
+`check_authorization` checks the EIP-712 typed data itself, exactly as you would pass it to
+`eth_signTypedData_v4`:
+
+```python
+from sra_riskgate import ActionDecision, check_authorization
+
+result = check_authorization(
+    typed_data,                      # dict or JSON string: domain, primaryType, message (types optional)
+    sender=MY_WALLET,                # must match message["from"]
+    max_validity_seconds=3600,       # default: hold anything valid for more than an hour
+    known_recipients=MY_PAYEES,      # plus any check_payment policy keyword
+    max_amount=100,
+)
+if result.decision == ActionDecision.APPROVE:
+    signature = wallet.sign_typed_data(typed_data)
+```
+
+A USDC `TransferWithAuthorization` (or `ReceiveWithAuthorization`) on a supported chain is decoded and
+passed to `check_payment` with your policy. Everything else is held:
+
+| Situation | Flag |
+|---|---|
+| EIP-2612 `Permit` (an allowance), with an effectively unlimited value | `TOKEN_APPROVAL`, `UNLIMITED_APPROVAL` |
+| Any other primary type | `UNSUPPORTED_SIGNATURE` |
+| `verifyingContract` is not USDC on the domain's chain | `UNSUPPORTED_ASSET` |
+| `from` or `chainId` disagree with `sender` / `chain_id` | `AUTHORIZATION_MISMATCH` |
+| `validBefore` has passed / `validAfter` is in the future | `AUTHORIZATION_EXPIRED` / `AUTHORIZATION_NOT_YET_VALID` |
+| Valid for longer than `max_validity_seconds` | `LONG_LIVED_AUTHORIZATION` |
+| Missing or malformed fields, or a `types` definition that is not USDC's | `INVALID_AUTHORIZATION` |
+
+The type definition is checked against the one behind USDC's EIP-3009 typehash, so typed data that would
+not hash to a USDC authorization is never approved.
+
 ## Dispute verdicts: check the window (0.10.0+)
 
 On the published benchmark, SRA-RiskGate-4B misjudges whether a dispute was filed inside the policy's

@@ -5,6 +5,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Model](https://img.shields.io/badge/🤗%20Model-SRA--RiskGate--4B-yellow)](https://huggingface.co/sriram1983007/SRA-RiskGate-4B)
 [![Results](https://img.shields.io/badge/🤗%20Results-Reproducible-brightgreen)](https://huggingface.co/datasets/sriram1983007/sra-bench-results)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb)
 
 Risk checks for stablecoin and AI-agent payments.
 
@@ -45,6 +46,8 @@ print(result.decision.value, result.flags)
 
 The payment is held, not paid: the request claims its own approval, and no USDC peg reading was supplied.
 Nothing needs a GPU, an API key or a network connection.
+
+Or run every check in your browser, nothing to install: [open the notebook in Colab](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb).
 
 Walkthrough with more examples: [Stop your AI agent from signing an unlimited USDC approval](https://dev.to/sriram1983007/stop-your-ai-agent-from-signing-an-unlimited-usdc-approval-10c0) (DEV.to).
 

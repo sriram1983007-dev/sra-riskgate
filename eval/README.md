@@ -10,6 +10,8 @@ These scripts produced the published results in
   such as vLLM, llama.cpp, Ollama or OpenRouter (`--backend openai`). Runs can be resumed.
 - **`make_table.py`** turns `results/*/scores.json` into a Markdown (and optional CSV) comparison table,
   including the prompt track and API cost of each run.
+- **`claims_check.py`**, **`dispute_window_check.py`** and **`profile_bench.py`** compute the paper's
+  analyses from the published predictions; see [Reproduce the paper](../README.md#reproduce-the-paper).
 - **`spec_prompt.json`** is the text added to the system prompt with `--prompt-variant spec`: the allowed
   labels (from the dataset's `schema/*.json`) and the decision rules (from its `SPEC.md`). It contains
   nothing from the private generator.

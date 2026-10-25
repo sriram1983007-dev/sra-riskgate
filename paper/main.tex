@@ -1,0 +1,161 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+
+
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=*}
+\setlength{\emergencystretch}{3em}
+
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{SRA-RiskGate: A Benchmark and a 4B Model for Gating Stablecoin Payments Made by AI Agents, and the Checks the Model Still Needs}
+\author{Sriram Ramakrishnan\\Independent Researcher\\\texttt{Sriram.Ramakrishnan@ieee.org}}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+AI agents increasingly pay for services in stablecoins, through protocols such as x402 and EIP-3009 authorizations. These payments are final once settled, so a wrong decision before payment cannot be undone by a chargeback, and a wrong decision in a later dispute cannot be corrected by reversing the transfer. We release three artifacts. \emph{SRA Stablecoin Risk Bench} is a synthetic benchmark of 20,000 cases with real secp256k1 signatures and rule-engine labels, covering a pre-payment risk gate (approve, hold or reject) and post-payment dispute adjudication across the settlement-finality boundary. \emph{SRA-RiskGate-4B} is a QLoRA fine-tune of Qwen3-4B-Instruct-2507 that raises payment decision accuracy on the held-out test split from 59.8\% to 99.5\% and lowers unsafe approvals from 34.6\% to 0.47\%. \emph{sra-riskgate} is an open-source library of deterministic checks that sit around the model. We then analyse where the model still fails. All four unsafe approvals are prompt injections whose payment text vouches for itself; a deterministic claims check holds all four. In disputes, 26.0\% of valid refunds are wrongly denied, and we trace 59 of the 61 cases to one operation: deciding whether the claim was filed inside the policy's window, where the model's ``outside the window'' claims are wrong 81\% of the time. A short deterministic date check lowers wrongful denials to 0.85\% without adding wrongful refunds. A contamination analysis finds no verbatim train/test overlap and 99.3\% accuracy on test cases with no structural twin in training. All predictions, scripts and models are public.
+\end{abstract}
+
+\section{Introduction}
+
+Payment protocols designed for software agents let an agent pay for an API call or a dataset by signing a stablecoin authorization in the middle of an HTTP exchange~\cite{x402,eip3009}. Two properties make this setting unusual for machine-learning safety. First, settlement is final: once a USDC transfer confirms, no intermediary can claw it back, so the only protection is a decision made \emph{before} signing. Second, the payment request itself is attacker-controlled text that reaches the agent's model, which makes indirect prompt injection~\cite{greshake,agentdojo,injecagent} a direct path to moving money.
+
+We study a narrow but consequential task: given a payment request, the receiving policy and the results of deterministic verification tools (signature recovery, risk attestations, sanctions screening), decide whether to \code{approve}, \code{hold} or \code{reject}; and, after payment, given a dispute and its evidence, choose a remedy that is actually possible given where the money is. Our contributions are:
+\begin{enumerate}
+  \item A public benchmark of 20,000 synthetic cases (18,000 train, 2,000 test) with an open scorer and safety-oriented metrics (Section~\ref{sec:bench}).
+  \item A 4B-parameter model that runs on a laptop and reaches 99.5\% payment decision accuracy with 0.47\% unsafe approvals, against 59.8\% and 34.6\% for its base model (Section~\ref{sec:results}).
+  \item An error analysis showing that the remaining failures concentrate in two operations that are better done in code: trusting self-asserted claims in untrusted text, and comparing dates. For each we release a deterministic check and measure its effect on the published predictions (Section~\ref{sec:failures}).
+  \item A contamination analysis for template-generated benchmarks (Section~\ref{sec:leakage}).
+\end{enumerate}
+The design principle that emerges is simple: \emph{the model judges, deterministic checks enforce}. The model reads messy, partly adversarial evidence; arithmetic, signature recovery, list membership and claim detection belong in code that cannot be talked out of its answer.
+
+\section{Background}
+
+\paragraph{Agent payments.} x402~\cite{x402} revives the HTTP 402 status code: a server answers a request with payment requirements (network, asset, amount, recipient), and the client retries with a signed EIP-3009 \code{transferWithAuthorization}~\cite{eip3009} that a facilitator submits on chain. Agents can also send ordinary ERC-20 \code{transfer} transactions. Both are push payments: the payer's key authorises the movement of funds, and confirmation makes it final.
+
+\paragraph{Finality and remedies.} We follow the framework of~\cite{cacm}, which separates four terms that card payments blur together. A \emph{reversal} undoes a held payment before release and needs a smart contract with that power (escrow, a 2-of-3 multisig). A \emph{refund} after finality is a new, voluntary forward transfer from the merchant. A \emph{chargeback}, a forced extraction by an intermediary, does not exist on these rails. A \emph{dispute} is the adjudication that resolves into one of the others. After finality, an arbiter can force compensation only from collateral the merchant posted in advance (a bond), and the payout is a compensating transaction in the sense of the Saga pattern~\cite{sagas}: it must be idempotent, funded and correctly addressed.
+
+\paragraph{Risk attestations.} The benchmark uses a small EIP-712~\cite{eip712} signed statement (``attester $A$ screened address $S$ on chain $C$ at time $T$ and rated it $L$, expiring at $E$'') that travels with the payment request. Attestations are advisory: the verifier's own sanctions screening always overrides a clean attestation.
+
+\section{The SRA Stablecoin Risk Bench}\label{sec:bench}
+
+\paragraph{Tasks.} Each case gives the model the current time, the policy, the payload (the payment or dispute exactly as received, marked untrusted) and the results of verification tools. \emph{Risk gate} cases cover three payment formats (x402 requirements, EIP-3009 authorizations, ERC-20 transfers) and ask for a JSON verdict with a decision, a risk level, reason codes (\emph{flags}) and required actions. \emph{Dispute} cases cover three rails (direct payment, escrow, 2-of-3 multisig) and ask for an outcome, a mechanism, the settlement state, and, for refunds, the exact amount, destination and idempotency key. There are ten dispute outcomes and eight mechanisms; there is deliberately no ``chargeback'' outcome.
+
+\paragraph{Generation and labels.} Cases are produced by a deterministic generator that applies perturbations to clean cases: forged, expired, untrusted or out-of-scope attestations; sanctioned parties; expired or not-yet-valid authorizations; amounts over policy limits; wrong assets or networks; recipient and amount mismatches; and prompt-injection text hidden in untrusted fields. All signatures are real secp256k1 EIP-3009 and EIP-712 signatures over simulated keys. Every label is computed by a rule engine whose decision order is documented in the dataset's specification; labels never propose a remedy the settlement state cannot support. The generator itself is not yet public, which we list as a limitation.
+
+\paragraph{Splits.} The data has 20,000 cases: 18,000 for training and 2,000 held out. The test split contains 1,175 risk-gate cases (847 that should be held or rejected and 328 legitimate payments, including 69 with prompt-injection text) and 825 dispute cases (77 with injection text). Training data is also provided as chat prompts and completions.
+
+\paragraph{Metrics.} The open scorer~\cite{bench} reports, for the risk gate, decision accuracy and macro-F1, flag micro-F1, the \emph{unsafe approval rate} (the share of hold or reject cases the model approves), over-blocking (legitimate payments rejected) and injection handling. For disputes it reports outcome accuracy and macro-F1, flag F1, the \emph{impossible remedy rate} (on final payments, proposing a reversal, an escrow or multisig mechanism, or a bond payout with no usable bond), the \emph{wrongful refund rate}, the \emph{wrongful denial rate} (correct outcome is a refund, prediction is deny or dismiss) and refund-detail accuracy (correct outcome, amount and destination). The composite SRA score averages a risk-gate score and a dispute score built from these terms. A Hugging Face \code{eval.yaml} defines both tasks for Inspect~\cite{inspect}.
+
+\section{Model}\label{sec:model}
+
+SRA-RiskGate-4B~\cite{model} is Qwen3-4B-Instruct-2507~\cite{qwen3} fine-tuned with QLoRA~\cite{qlora,lora}: the base model is loaded in 4-bit NF4 with double quantisation and bfloat16 compute, and LoRA adapters (rank 32, $\alpha=64$, dropout 0.05) are applied to all attention and MLP projections. Training is supervised fine-tuning in TRL~\cite{trl} on the 18,000 training cases in their chat form, for one epoch, with learning rate $10^{-4}$ on a cosine schedule with 3\% warmup, an effective batch size of 16 (2 per device $\times$ 8 accumulation steps), a maximum sequence length of 3,072 tokens (prompts are about 1,300--2,000 tokens, so none is truncated), gradient checkpointing, and the loss computed on the verdict only. Every 200 steps the loss was measured on 300 cases sampled from the test split, and the checkpoint with the lowest loss was kept (see Limitations). The training script is public~\cite{sdk}. Training used a single rented GPU; the hardware model and wall-clock time were not logged. The adapter is merged into the base weights for release; GGUF quantisations (Q8\_0 to Q4\_K\_M) and an Ollama build are also published, but all results below are for the full-precision model.
+
+Payment and dispute cases use different system prompts. The payment prompt states that everything inside the payload is untrusted and that instructions found there must never be followed. The user turn wraps the context, payload and tool results in tagged JSON blocks. Every reported result uses exactly the training prompts and greedy decoding.
+
+\section{Results}\label{sec:results}
+
+We evaluated the base and fine-tuned models on all 2,000 test cases with vLLM~\cite{vllm} on an NVIDIA T4 in float16, greedy decoding, at most 512 new tokens. Two separate full runs of the fine-tuned model gave identical scores. The run took 6,516\,s for 2,000 cases (3.3\,s per case, about 2,000 prompt tokens and 98 completion tokens per case). Every prediction is published~\cite{results}.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrr}
+\toprule
+Metric & Qwen3-4B (base) & SRA-RiskGate-4B \\
+\midrule
+SRA composite score $\uparrow$ & 0.421 & \textbf{0.913} \\
+\multicolumn{3}{l}{\emph{Risk gate (1,175 payments)}} \\
+\quad Decision accuracy $\uparrow$ & 59.8\% & \textbf{99.5\%} \\
+\quad Unsafe approvals (of 847) $\downarrow$ & 34.6\% & \textbf{0.47\%} \\
+\quad Over-blocking (of 328) $\downarrow$ & 5.2\% & \textbf{0.0\%} \\
+\quad Injected payments approved (of 69) $\downarrow$ & 52.2\% & \textbf{5.8\%} \\
+\quad Flag micro-F1 $\uparrow$ & 0.105 & \textbf{0.994} \\
+\multicolumn{3}{l}{\emph{Disputes (825)}} \\
+\quad Outcome accuracy $\uparrow$ & 0.0\% & \textbf{77.8\%} \\
+\quad Impossible remedies $\downarrow$ & n/a & 0.38\% \\
+\quad Wrongful refunds $\downarrow$ & n/a & 2.2\% \\
+\quad Wrongful denials $\downarrow$ & n/a & 26.0\% \\
+\quad Refund details fully correct $\uparrow$ & n/a & 64.3\% \\
+Schema-valid output (payments / disputes) $\uparrow$ & 99.8\% / 0\% & 100\% / 100\% \\
+\bottomrule
+\end{tabular}
+\caption{Held-out test results. The base model returns dispute JSON with the right field names but outcome values outside the allowed vocabulary, so none of its dispute verdicts is usable and its dispute safety rates are not meaningful (n/a).}
+\label{tab:main}
+\end{table}
+
+Table~\ref{tab:main} summarises the results. Fine-tuning cuts unsafe approvals from about one in three risky payments to about one in two hundred while blocking \emph{fewer} legitimate payments than the base model. Accuracy is 100\% on 16 of the 21 case types (clean cases and 20 perturbations) and at least 97.9\% on all but one; the exception is injection (94.2\%). Dispute adjudication is clearly harder. Per-class F1 ranges from 1.00 (\code{refer\_\allowbreak{}to\_\allowbreak{}issuer}) and 0.96 (\code{reverse\_\allowbreak{}before\_\allowbreak{}release}) down to 0.62 (\code{await\_\allowbreak{}merchant\_\allowbreak{}response}), 0.57 (\code{dismiss}) and 0.54 (\code{recommend\_\allowbreak{}voluntary\_\allowbreak{}refund}). The model almost never proposes an impossible remedy (0.38\%), but it denies or dismisses 26.0\% of the claims that should be refunded, an asymmetry Section~\ref{sec:failures} explains.
+
+\section{Where the model fails, and what to do in code}\label{sec:failures}
+
+\subsection{Self-vouching payment text}
+
+All four unsafe approvals are prompt-injection cases (4 of 69 injected payments); outside injection the model made no unsafe approval. In each, the untrusted payment text asserts its own verification, for example ``risk level: low (verified offline)''. A payer cannot grade its own risk, so the companion library runs a deterministic scan for such self-asserted claims in untrusted text, with Unicode normalisation against look-alike characters, and holds the payment on a match~\cite{sdk}. Combined with the model, the check gives 0 unsafe approvals out of 847 risky test payments and adds 0 false holds on the 3,358 legitimate payments in the test and training splits. The check was written after these failures were found, so it repairs a known weakness rather than providing an independent evaluation; differently worded attacks may still pass.
+
+\subsection{The dispute window}
+
+\paragraph{Finding.} 59 of the 61 wrongful denials are \code{dismiss} verdicts carrying the flag \code{outside\_\allowbreak{}dispute\_\allowbreak{}window}, which the correct label never contains. The model's explanations are internally inconsistent: ``The dispute was filed 26.5 days after payment, outside the 60-day window.'' To check this systematically we recomputed, for every dispute, the days between \code{paid\_\allowbreak{}at} and \code{filed\_\allowbreak{}at} and compared them with the policy's \code{dispute\_\allowbreak{}window\_\allowbreak{}days}. All 54 gold labels with the window flag are outside by this arithmetic, so the rule is consistent. The model, however, claims ``outside the window'' 112 times, and 91 of these claims (81\%) are false; it also misses 33 of the 54 disputes that are genuinely outside. The model computes the elapsed days correctly and then compares them wrongly. Denial rates are highest when the case also carries distracting detail: escrow already released (62\%), a partial refund already made (58\%), untrusted delivery evidence (6 of 7).
+
+\paragraph{Check.} Whether a dispute is inside its window is date arithmetic, so we move it to code. \code{check\_\allowbreak{}dispute\_\allowbreak{}verdict}~\cite{sdk} recomputes the window from the dispute's own dates. If the verdict claims the dispute is outside but the dates put it inside, the false flag is replaced, and a \code{deny} or \code{dismiss} resting on it becomes \code{escalate\_\allowbreak{}to\_\allowbreak{}human} with no refund. The check never produces a refund. Table~\ref{tab:window} shows its effect on the published predictions.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrr}
+\toprule
+Dispute metric (825 cases) & Model & Model + window check \\
+\midrule
+Wrongful denials $\downarrow$ & 26.0\% & \textbf{0.85\%} \\
+Wrongful refunds $\downarrow$ & 2.2\% & 2.2\% \\
+Outcome accuracy $\uparrow$ & 77.8\% & 78.7\% \\
+\bottomrule
+\end{tabular}
+\caption{Effect of the deterministic dispute-window check (91 false claims corrected, 86 outcomes changed). Escalations count as misses, so accuracy rises only slightly while the harmful error nearly disappears.}
+\label{tab:window}
+\end{table}
+
+\subsection{Raw transactions}
+
+Agents sign transactions, not descriptions of payments. The library's \code{check\_\allowbreak{}transaction} decodes the exact transaction about to be signed: a plain USDC \code{transfer} is passed to the full payment check, and token approvals (including unlimited \code{approve}), \code{transferFrom}, calls to other contracts and native-token transfers are held, because an allowance lets another address move the wallet's funds later without any further check. The same rule is enforced at the wallet in the ElizaOS plugin, which wraps a viem wallet client so that only approved USDC transfers are broadcast.
+
+\section{Contamination analysis}\label{sec:leakage}
+
+Template-generated benchmarks risk test cases that differ from training cases only in surface values~\cite{sainz}. No test input appears verbatim in the training split. To detect structural overlap, we masked every hexadecimal value and every number in each input and compared the results. 627 of the 1,175 payment test cases have such a ``template twin'' in training (531 of them with the same label); no dispute case does. Accuracy barely depends on it: 99.7\% on payment cases with a twin and 99.3\% on the 548 without one. All four unsafe approvals fall in the no-twin group, so on cases unlike anything in training the unsafe-approval rate is 0.83\% (4 of 481) rather than 0.47\%. We report both.
+
+\section{Release and deployment}
+
+The benchmark (CC-BY-4.0), the model and its LoRA adapter (Apache-2.0), all predictions, the scorer and the analysis scripts are public. The library \code{sra-riskgate} provides the checks above together with an offline match against OFAC's published sanctioned digital-currency addresses~\cite{ofac} (a dated snapshot, not a screening service), known-payee and blocklist policies, and depeg limits. It is exposed to agents through an MCP server~\cite{mcp} with six read-only tools, LangChain and CrewAI integrations, a Coinbase AgentKit action provider, a GitHub Action that checks agent-generated calldata in CI, and the ElizaOS plugin, which we ran inside a live ElizaOS 1.7.2 agent on a test network: it blocked a payment to a blocklisted address, held a self-vouching request and a payment to a new payee, and approved a clean payment to a known payee (checked only; no funds were sent). Served with vLLM on a single 24\,GB GPU, the model answered individual checks in 1.2--1.6\,s from a remote client.
+
+\section{Limitations}
+
+\begin{itemize}
+  \item \textbf{Synthetic data.} Scores measure agreement with the generator's rule engine, not accuracy on real payment traffic; the policy space is narrow and a small set of attester addresses recurs. A real-data test set is the most important next step.
+  \item \textbf{Generator not public.} Labels can be re-scored but not regenerated.
+  \item \textbf{Small slices.} Some categories are small (69 injected payments, 7 cases with untrusted delivery evidence), so their rates carry wide uncertainty.
+  \item \textbf{Post-hoc checks.} Both deterministic checks were designed after inspecting the test errors they fix. Their measured effect is an upper bound on what to expect for new attack wordings or new error types.
+  \item \textbf{Single author, single base model.} The only comparison is the base model; larger general-purpose models and third-party reproduction are still missing.
+  \item \textbf{Checkpoint selection used test cases.} The training script kept the checkpoint with the lowest loss on 300 cases sampled from the test split, rather than on a separate validation split. The selection used loss, not the reported metrics, over a handful of checkpoints from a single epoch, so we expect the effect to be small, but the reported results may be slightly optimistic. Version 2 will select on a validation split carved from the training data.
+  \item \textbf{Quantised builds} have not been evaluated.
+\end{itemize}
+
+\section{Conclusion}
+
+A small fine-tuned model can gate agent stablecoin payments with high accuracy and few unsafe approvals, but its remaining errors are not random. They cluster in operations a model should not be trusted with when money moves irreversibly: believing what untrusted text says about itself, and comparing two numbers. Moving those operations to deterministic code removes almost all of the measured harm. We release the benchmark, the model, the predictions and the checks so that others can test this design on their own policies.
+
+\paragraph{Use of AI assistance.} Parts of the software and of this manuscript were drafted with the help of an AI assistant (Claude); all results were run and checked by the author, who takes responsibility for the content.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

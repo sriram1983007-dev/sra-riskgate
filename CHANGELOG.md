@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0 — 2026-10-25
+
+### Added
+- `check_authorization(typed_data, *, sender=None, chain_id=None, now=None, max_validity_seconds=3600, **policy)`:
+  checks the EIP-712 typed data an agent signs for an x402 payment (EIP-3009 `TransferWithAuthorization`
+  or `ReceiveWithAuthorization`) before it signs. Checks the domain is USDC on a supported chain, the
+  type definition is USDC's, `from` and `chainId` match, and the authorization is current and short-lived
+  (`AUTHORIZATION_EXPIRED`, `AUTHORIZATION_NOT_YET_VALID`, `LONG_LIVED_AUTHORIZATION`), then runs the decoded
+  payment through `check_payment`. An EIP-2612 `Permit` is held as `TOKEN_APPROVAL`; other types as
+  `UNSUPPORTED_SIGNATURE`. Never raises; anything unexpected is held.
+
+No change to `check_payment`, `check_transaction`, `check_dispute_verdict` or any existing decision.
+
 ## 0.10.1 — 2026-10-25
 
 Packaging and documentation only; no code or decision changes.

@@ -384,7 +384,35 @@ and limitations. GGUF builds for llama.cpp, Ollama and LM Studio:
 [SRA-RiskGate-4B-GGUF](https://huggingface.co/sriram1983007/SRA-RiskGate-4B-GGUF) (official), and community
 quantizations by mradermacher in [static](https://huggingface.co/mradermacher/SRA-RiskGate-4B-GGUF) and
 [imatrix](https://huggingface.co/mradermacher/SRA-RiskGate-4B-i1-GGUF) variants (results above were measured
-on the full-precision model, not the quantizations). To reproduce or add a model, see [`eval/README.md`](eval/README.md).
+on the full-precision model, not the quantizations). To reproduce the paper's numbers, see
+[Reproduce the paper](#reproduce-the-paper); to evaluate another model, see [`eval/README.md`](eval/README.md).
+
+## Reproduce the paper
+
+The paper ([`paper/SRA-RiskGate-paper.pdf`](paper/SRA-RiskGate-paper.pdf)) reports numbers computed from
+published files. Download them once (about 90 MB):
+
+```bash
+pip install -U "huggingface_hub[cli]" "sra-riskgate>=0.10.0"
+hf download sriram1983007/sra-bench-results --repo-type dataset --local-dir results
+hf download sriram1983007/sra-stablecoin-risk-bench score.py data/benchmark/train.jsonl \
+    --repo-type dataset --local-dir bench
+M=results/sra-riskgate-4b; B=results/qwen3-4b-instruct-base; TRAIN=bench/data/benchmark/train.jsonl
+```
+
+| Paper result | Command |
+|---|---|
+| Main results table, both models | `python bench/score.py --gold $M/test.jsonl --pred $M/predictions.jsonl` (and the same with `$B`) |
+| Self-vouching payments: 4 → 0 unsafe approvals of 847; 0 false holds on 3,358 legitimate payments | `python eval/claims_check.py $M/test.jsonl $M/predictions.jsonl $TRAIN` |
+| Dispute error profile (59 of 61 wrongful denials) | `python eval/profile_bench.py $M/test.jsonl $M/predictions.jsonl` |
+| Dispute window: 91 of 112 "outside" claims false, 33 of 54 missed | `python eval/profile_bench.py $M/test.jsonl $M/predictions.jsonl --window` |
+| Window check: wrongful denials 26.0% → 0.85%, wrongful refunds 2.2% unchanged | `python eval/dispute_window_check.py $M/test.jsonl $M/predictions.jsonl` |
+| Contamination: 0 exact duplicates, 627 template twins | `python eval/profile_bench.py $M/test.jsonl $M/predictions.jsonl $TRAIN` |
+| Accuracy with and without a template twin (99.7% / 99.3%), unsafe approvals 4 of 481 | `python eval/profile_bench.py $M/test.jsonl $M/predictions.jsonl $TRAIN --leak-split` |
+| The predictions themselves | [`eval/run_eval.py`](eval/README.md) with vLLM, greedy decoding |
+| The model | [`training/`](training/README.md): the training script and the exact configuration used |
+
+The analysis scripts use only the standard library and `sra-riskgate`; none needs a GPU.
 
 ## Development
 

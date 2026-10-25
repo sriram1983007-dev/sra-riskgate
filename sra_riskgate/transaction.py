@@ -11,7 +11,8 @@ import inspect
 from decimal import Decimal
 from typing import Any, Mapping, Optional
 
-from sra_riskgate.chains import USDC_ADDRESSES, USDC_DECIMALS, is_usdc
+from sra_riskgate.chains import (NATIVE_USDC_CHAINS, NATIVE_USDC_DECIMALS, USDC_ADDRESSES, USDC_DECIMALS,
+                                  is_usdc)
 from sra_riskgate.check import _verdict, check_payment
 from sra_riskgate.models import ActionDecision, RiskAssessment
 
@@ -108,6 +109,10 @@ def check_transaction(
       ``transferWithAuthorization``, ...).
     * ``UNSUPPORTED_ASSET`` when ``to`` is not the USDC contract on that chain.
     * ``NATIVE_VALUE_TRANSFER`` when the transaction moves native ETH.
+
+    On Arc (5042, testnet 5042002) USDC is the native asset, so a plain native send (value, no
+    calldata) to an address is a USDC payment: its value is read with 18 decimals, rounded up to a whole
+    micro-USDC, and passed to ``check_payment`` like a ``transfer``. Native value sent together with a contract call is held.
     * ``UNSUPPORTED_CHAIN``, ``INVALID_TRANSACTION`` (missing or malformed fields) and
       ``TRANSACTION_MISMATCH`` (``from`` or ``chainId`` disagree with the arguments).
 
@@ -142,10 +147,32 @@ def check_transaction(
             value = _int(tx.get("value"))
         except (TypeError, ValueError):
             return _hold(["INVALID_TRANSACTION"], f"value {tx.get('value')!r} is not an integer.")
+        to = tx.get("to")
+        raw = tx.get("data", tx.get("input"))
         if value != 0:
+            if chain_id in NATIVE_USDC_CHAINS:
+                # On Arc the native asset is USDC: a plain send to an address is a USDC payment.
+                h = _hex(raw if raw is not None else "")
+                if h is None:
+                    return _hold(["INVALID_TRANSACTION"], "the calldata is not hex.")
+                if h:
+                    return _hold(["NATIVE_VALUE_TRANSFER"],
+                                 "it sends native USDC together with a contract call, which is not checked.")
+                if not to:
+                    return _hold(["INVALID_TRANSACTION"], "it has no 'to' address (a contract deployment?).")
+                if is_usdc(chain_id, to):
+                    return _hold(["INVALID_TRANSACTION"],
+                                 "it sends native USDC to the USDC contract itself, which is not a payment.")
+                if value < 0:
+                    return _hold(["INVALID_TRANSACTION"], "the value is negative.")
+                # Round up to a whole micro-USDC (the ERC-20 interface's smallest unit), so no limit can
+                # be passed by an amount that differs from it only below that precision.
+                scale = 10 ** (NATIVE_USDC_DECIMALS - USDC_DECIMALS)
+                micro = -(-value // scale)
+                amount = float(Decimal(micro) / (Decimal(10) ** USDC_DECIMALS))
+                return check_payment(chain_id=chain_id, sender=sender, recipient=to, amount=amount, **policy)
             return _hold(["NATIVE_VALUE_TRANSFER"], f"it sends {value} wei of native ETH, which is not checked.")
 
-        to = tx.get("to")
         if not to:
             return _hold(["INVALID_TRANSACTION"], "it has no 'to' address (a contract deployment?).")
         if not is_usdc(chain_id, to):
@@ -153,7 +180,6 @@ def check_transaction(
                          f"it calls {to}, which is not the USDC contract on chain {chain_id} "
                          f"({USDC_ADDRESSES[chain_id]}).")
 
-        raw = tx.get("data", tx.get("input"))
         h = _hex(raw if raw is not None else "")
         if h is None or len(h) < 8:
             return _hold(["INVALID_TRANSACTION"], "the calldata is empty or not hex.")

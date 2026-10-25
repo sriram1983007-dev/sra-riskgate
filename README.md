@@ -88,7 +88,7 @@ Only pay on `approve`.
 |---|---|---|
 | Sender or recipient is on the OFAC SDN list (bundled snapshot) | reject | `OFAC_SDN_MATCH` |
 | Sender or recipient is in your `blocked_addresses` | reject | `BLOCKLISTED_ADDRESS` |
-| Token is not USDC, or chain is not Ethereum, Base or Base Sepolia | hold | `UNSUPPORTED_ASSET` / `UNSUPPORTED_CHAIN` |
+| Token is not USDC, or chain is not Ethereum, Base, Base Sepolia, Arc or Arc Testnet | hold | `UNSUPPORTED_ASSET` / `UNSUPPORTED_CHAIN` |
 | Malformed, zero or self address; amount ≤ 0, NaN, infinite or below 0.000001 USDC | reject | `INVALID_PAYMENT` |
 | Invalid thresholds, or a malformed address list | reject | `CONFIGURATION_ERROR` |
 | Rules (see below) | approve / hold / reject | rule flags |
@@ -190,7 +190,9 @@ if result.decision != ActionDecision.APPROVE:
 | Any other USDC function (`transferFrom`, `transferWithAuthorization`, ...) | hold | `UNSUPPORTED_FUNCTION` |
 | `to` is not the USDC contract on that chain | hold | `UNSUPPORTED_ASSET` |
 | Moves native ETH (`value` > 0) | hold | `NATIVE_VALUE_TRANSFER` |
-| Chain not Ethereum, Base or Base Sepolia | hold | `UNSUPPORTED_CHAIN` |
+| Arc only: plain native send (`value` > 0, no calldata) to an address | as `check_payment` decides, with `value` read in 18 decimals | its flags |
+| Arc only: native value sent with a contract call | hold | `NATIVE_VALUE_TRANSFER` |
+| Chain not Ethereum, Base, Base Sepolia, Arc or Arc Testnet | hold | `UNSUPPORTED_CHAIN` |
 | `from` or `chainId` disagree with `sender` / `chain_id` | hold | `TRANSACTION_MISMATCH` |
 | Missing fields, malformed or wrong-length calldata | hold | `INVALID_TRANSACTION` |
 
@@ -237,6 +239,22 @@ passed to `check_payment` with your policy. Everything else is held:
 
 The type definition is checked against the one behind USDC's EIP-3009 typehash, so typed data that would
 not hash to a USDC authorization is never approved.
+
+## Arc (0.12.0+)
+
+[Arc](https://docs.arc.io), Circle's blockchain, is supported on mainnet (chain id `5042`) and testnet (`5042002`), in
+every check. On Arc, USDC is the native asset: it pays for gas and is held with 18 decimals, and an optional ERC-20
+interface at `0x3600000000000000000000000000000000000000` moves the same balance with 6 decimals. So:
+
+- an ERC-20 `transfer()` at that address is checked like USDC on any other chain (6 decimals);
+- a plain native send (value, no calldata) is a USDC payment too: `check_transaction` reads its value with
+  18 decimals (rounded up to a whole micro-USDC, so no limit is passed by dust) and runs the same payment checks,
+  so 25 USDC is `value = 25 * 10**18`;
+- native value sent together with a contract call is held (`NATIVE_VALUE_TRANSFER`);
+- x402 signatures (EIP-3009 at the same address, amounts in 6 decimals) go through `check_authorization`.
+
+Circle recommends the ERC-20 interface for balances and transfers. Mixing the two decimal scales is the most likely
+integration bug on Arc, so the native path is covered by its own tests.
 
 ## Dispute verdicts: check the window (0.10.0+)
 
@@ -351,7 +369,7 @@ client = RiskGateX402Hooks(max_amount=50, payer_address=MY_WALLET).attach_to_cli
 
 Rejected, held, malformed or unknown payments are aborted with a reason starting with
 `sra_riskgate_` (for example `sra_riskgate_hold`), which x402 raises as `PaymentAbortedError`.
-USDC on Ethereum, Base and Base Sepolia is checked; other assets are aborted unless
+USDC on Ethereum, Base, Base Sepolia, Arc and Arc Testnet is checked; other assets are aborted unless
 `allow_unsupported_assets=True`. Pass `peg_feed` to enable depeg checks and `on_decision` to log
 every decision. x402's own client spend controls stay active alongside these checks.
 

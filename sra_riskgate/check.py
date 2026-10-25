@@ -57,8 +57,8 @@ def check_payment(
          turns it off. It is an exact address match against a dated snapshot, not a screening service.
          A list older than ``sanctions_max_age_days`` adds the informational flag SANCTIONS_LIST_STALE.
       1b. Blocklist: sender or recipient in ``blocked_addresses`` gives REJECT (BLOCKLISTED_ADDRESS).
-      2. Supported asset and chain: USDC on Ethereum (1), Base (8453) or Base Sepolia (84532),
-         otherwise HOLD.
+      2. Supported asset and chain: USDC on Ethereum (1), Base (8453), Base Sepolia (84532),
+         Arc (5042) or Arc Testnet (5042002), otherwise HOLD.
       3. Validation: malformed, zero or self address, or a non-positive amount, gives REJECT.
       4. Rules (``RulePreFilter``): per-payment ceiling and, if ``peg_deviation_pct`` is given,
          depeg thresholds. If ``known_recipients`` is given (even empty), a recipient not on it

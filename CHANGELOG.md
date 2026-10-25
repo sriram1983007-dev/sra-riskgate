@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.1 — 2026-10-25
+
+Packaging and documentation only; no code or decision changes.
+
+- README opens with a copy-paste example that runs with no GPU, API key or network.
+- PyPI metadata: Python 3.10–3.14, development status, audience and security classifiers; more keywords;
+  links to documentation, issues, the model, the benchmark, the MCP server and the LangChain integration.
+
 ## 0.10.0 — 2026-10-24
 
 ### Added

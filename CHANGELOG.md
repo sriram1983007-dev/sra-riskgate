@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.0 — 2026-10-25
+
+### Added
+- **Arc** (Circle's blockchain), mainnet `5042` and testnet `5042002`, in every check: `check_payment`,
+  `check_transaction`, `check_authorization` and the x402 hooks (`eip155:5042`, or the names `arc` and
+  `arc-testnet`). USDC's ERC-20 interface is at `0x3600000000000000000000000000000000000000` (6 decimals).
+- On Arc, USDC is the native asset, so `check_transaction` treats a plain native send (value, no calldata) as a
+  USDC payment: the value is read with 18 decimals, rounded up to a whole micro-USDC so dust cannot pass a
+  limit, and gets every payment check. Native value sent together with a contract call is held
+  (`NATIVE_VALUE_TRANSFER`), as is native USDC sent to the USDC contract itself.
+- `chains.NATIVE_USDC_CHAINS` and `chains.NATIVE_USDC_DECIMALS`.
+
+No change to any decision on Ethereum, Base or Base Sepolia: native value there is still ETH and still held.
+
 ## 0.11.0 — 2026-10-25
 
 ### Added

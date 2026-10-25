@@ -9,13 +9,22 @@ USDC_ADDRESSES: dict[int, str] = {
     1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",      # Ethereum mainnet
     8453: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",   # Base mainnet
     84532: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",  # Base Sepolia
+    5042: "0x3600000000000000000000000000000000000000",   # Arc mainnet: ERC-20 interface to native USDC
+    5042002: "0x3600000000000000000000000000000000000000",  # Arc testnet
 }
+
+# Chains where USDC is the native asset (Arc). A plain native send there is a USDC payment, in
+# NATIVE_USDC_DECIMALS units; the ERC-20 interface above moves the same balance in USDC_DECIMALS units.
+NATIVE_USDC_CHAINS: frozenset[int] = frozenset({5042, 5042002})
+NATIVE_USDC_DECIMALS = 18
 
 # Legacy (x402 v1) network names
 LEGACY_NETWORKS: dict[str, int] = {
     "ethereum": 1,
     "base": 8453,
     "base-sepolia": 84532,
+    "arc": 5042,
+    "arc-testnet": 5042002,
 }
 
 

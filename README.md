@@ -189,12 +189,19 @@ if result.decision != ActionDecision.APPROVE:
 | USDC `approve`, `increaseAllowance` or `permit` | hold | `TOKEN_APPROVAL` (plus `UNLIMITED_APPROVAL` for an unlimited amount) |
 | Any other USDC function (`transferFrom`, `transferWithAuthorization`, ...) | hold | `UNSUPPORTED_FUNCTION` |
 | `to` is not the USDC contract on that chain | hold | `UNSUPPORTED_ASSET` |
+| EIP-7702 (type 4), or any `authorizationList`: delegates the whole account to contract code | hold | `CODE_DELEGATION` |
 | Moves native ETH (`value` > 0) | hold | `NATIVE_VALUE_TRANSFER` |
 | Arc only: plain native send (`value` > 0, no calldata) to an address | as `check_payment` decides, with `value` read in 18 decimals | its flags |
 | Arc only: native value sent with a contract call | hold | `NATIVE_VALUE_TRANSFER` |
 | Chain not Ethereum, Base, Base Sepolia, Arc or Arc Testnet | hold | `UNSUPPORTED_CHAIN` |
 | `from` or `chainId` disagree with `sender` / `chain_id` | hold | `TRANSACTION_MISMATCH` |
 | Missing fields, malformed or wrong-length calldata | hold | `INVALID_TRANSACTION` |
+
+An EIP-7702 authorization is worse than any approval: it makes the wallet's own account run a contract's
+code, and a chain id of 0 makes it valid on every chain. It is not a transaction and not EIP-712 typed data, so
+a wallet library can sign one on its own (viem `signAuthorization`, eth-account `sign_authorization`). Route
+that call through `check_delegation(authorization)`, which always holds it for a person (`CODE_DELEGATION`);
+inside a transaction, `check_transaction` holds it before any other check.
 
 An approval lets another address spend the wallet's USDC later, without a further check: it is the usual
 way agent wallets are drained, so it is never approved here. `decode_erc20_transfer(calldata)` returns

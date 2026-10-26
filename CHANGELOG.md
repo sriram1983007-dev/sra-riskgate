@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.1 — 2026-10-25
+
+### Fixed
+- **EIP-7702 delegations were not seen.** A type 4 transaction whose `to` and calldata were a clean USDC
+  `transfer` was approved even when its `authorizationList` delegated the wallet's account to a contract,
+  on every chain with chain id 0. `check_transaction` now holds any type 4 transaction, and any transaction
+  with a non-empty `authorizationList`, as `CODE_DELEGATION`, before every other check; the explanation names
+  the contract and whether the authorization is valid on every chain. Reported by Carlos (Bloqarl) on DEV.to.
+
+### Added
+- `check_delegation(authorization)`: for a standalone EIP-7702 authorization (viem `signAuthorization`,
+  eth-account `sign_authorization`), which neither a transaction check nor `check_authorization` sees. It
+  always holds (`CODE_DELEGATION`); route your wallet library's authorization signing through it.
+
 ## 0.12.0 — 2026-10-25
 
 ### Added

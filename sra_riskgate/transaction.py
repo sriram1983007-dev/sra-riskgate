@@ -80,6 +80,47 @@ _POLICY_KEYS = frozenset(inspect.signature(check_payment).parameters) - {
     "chain_id", "sender", "recipient", "amount", "token"}
 
 
+_DELEGATION_KEYS = ("authorizationList", "authorization_list", "authorizations")
+
+
+def _describe_delegation(auth: object) -> str:
+    """'to <address> on chain <n>' for one EIP-7702 authorization, as far as it can be read."""
+    if isinstance(auth, Mapping):
+        target = auth.get("address", auth.get("contractAddress"))
+        chain = auth.get("chainId", auth.get("chain_id"))
+    else:  # a signed authorization object, e.g. eth-account's SignedSetCodeAuthorization
+        target = getattr(auth, "address", None)
+        chain = getattr(auth, "chain_id", getattr(auth, "chainId", None))
+        if isinstance(target, (bytes, bytearray)):
+            target = "0x" + bytes(target).hex()
+    if target is None and chain is None:
+        return "(the authorization could not be read)"
+    try:
+        every = chain is not None and not isinstance(chain, bool) and _int(chain) == 0
+    except (TypeError, ValueError):
+        every = False
+    where = "on every chain (chain id 0)" if every else f"on chain {chain}"
+    return f"to {target} {where}"
+
+
+def check_delegation(authorization: object = None) -> RiskAssessment:
+    """Check an EIP-7702 authorization before the agent signs it. Always HOLD (``CODE_DELEGATION``).
+
+    An EIP-7702 authorization is not a transaction and not EIP-712 typed data: it is a signature over
+    (chain id, contract address, nonce) that makes the wallet's own account run that contract's code, so
+    the contract can move everything the account holds, in every token, without further signatures. A
+    chain id of 0 makes it valid on every chain. No payment check can make that safe, so an agent must never
+    sign one on its own. Route your wallet library's authorization signing (viem ``signAuthorization``,
+    eth-account ``sign_authorization``) through this function and stop on anything but approve."""
+    try:
+        what = _describe_delegation(authorization) if authorization is not None else "of unknown target"
+    except Exception:
+        what = "of unknown target"
+    return _hold(["CODE_DELEGATION"],
+                 f"it is an EIP-7702 delegation of this wallet's account {what}, which gives that contract "
+                 f"control of everything the wallet holds; a person must approve it.")
+
+
 def _hold(flags: list, why: str) -> RiskAssessment:
     return _verdict(ActionDecision.HOLD, flags, f"SRA-RiskGate cannot approve this transaction: {why}",
                     ["manual_review"])
@@ -109,6 +150,9 @@ def check_transaction(
       ``transferWithAuthorization``, ...).
     * ``UNSUPPORTED_ASSET`` when ``to`` is not the USDC contract on that chain.
     * ``NATIVE_VALUE_TRANSFER`` when the transaction moves native ETH.
+    * ``CODE_DELEGATION`` for an EIP-7702 (type 4) transaction, or any transaction carrying an
+      ``authorizationList``: it delegates the whole account to contract code. Checked first, so a clean
+      transfer cannot carry a delegation through. Standalone authorizations: ``check_delegation``.
 
     On Arc (5042, testnet 5042002) USDC is the native asset, so a plain native send (value, no
     calldata) to an address is a USDC payment: its value is read with 18 decimals, rounded up to a whole
@@ -126,6 +170,20 @@ def check_transaction(
     try:
         if not isinstance(tx, Mapping):
             return _hold(["INVALID_TRANSACTION"], "the transaction is not a mapping.")
+        # EIP-7702 (type 4): the authorization list delegates the account to contract code. It is checked
+        # before anything else, because the rest of the transaction can be a perfectly clean transfer.
+        tx_type = tx.get("type")
+        auths = next((tx.get(k) for k in _DELEGATION_KEYS if tx.get(k) is not None), None)
+        is_type_4 = str(tx_type).strip().lower() in ("4", "0x4", "0x04")
+        if isinstance(auths, (list, tuple)) and not auths and not is_type_4:
+            auths = None  # an empty list on an ordinary transaction delegates nothing
+        if auths is not None or is_type_4:
+            listed = auths if isinstance(auths, (list, tuple)) else ([auths] if auths else [])
+            what = "; ".join(_describe_delegation(a) for a in listed) or "with an unreadable authorization list"
+            return _hold(["CODE_DELEGATION"],
+                         f"it carries an EIP-7702 authorization that delegates this wallet's account {what}. "
+                         f"That gives the contract control of everything the wallet holds, which is worse than "
+                         f"any token approval; a person must approve it.")
         tx_from, tx_chain = tx.get("from"), tx.get("chainId", tx.get("chain_id"))
         if tx_chain is not None and not isinstance(tx_chain, bool):
             try:

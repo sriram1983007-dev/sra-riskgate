@@ -94,10 +94,11 @@ def test_other_signatures_on_gateway_domain_are_held(primary):
 
 
 def test_gateway_validity_limit():
-    assert check(gw(days=7)).decision == ActionDecision.APPROVE
-    r = check(gw(days=8))
+    assert check(gw(days=8)).decision == ActionDecision.APPROVE
+    r = check(gw(days=9))
     assert r.flags == ["LONG_LIVED_AUTHORIZATION"] and "Circle Gateway" in r.explanation
-    assert check(gw(days=8), max_gateway_validity_seconds=10 * DAY).decision == ActionDecision.APPROVE
+    assert "9.00 days" in r.explanation and "8.00 days limit" in r.explanation
+    assert check(gw(days=9), max_gateway_validity_seconds=10 * DAY).decision == ActionDecision.APPROVE
     # the one-hour limit for ordinary x402 does not apply to Gateway, and vice versa
     assert check(gw(), max_validity_seconds=60).decision == ActionDecision.APPROVE
 
@@ -125,3 +126,22 @@ def test_real_signature_over_gateway_typed_data():
     signed = acct.sign_typed_data(full_message={**td, "message": msg})
     assert len(signed.signature) == 65
     assert check(td, sender=acct.address).decision == ActionDecision.APPROVE
+
+
+def test_payment_signed_by_circles_own_sdk_is_approved():
+    """0.13.1: a real payment from @circle-fin/x402-batching 4.0.0 (7 days + 100 s) was held by 0.13.0."""
+    import json
+    from pathlib import Path
+    d = json.loads((Path(__file__).parent / "data" / "circle_sdk_gateway_payment.json").read_text())
+    td = d["typed_data"]
+    r = check_authorization(td, sender=td["message"]["from"], chain_id=5042002, now=d["now"], peg_deviation_pct=0.1)
+    assert r.decision == ActionDecision.APPROVE and r.flags == []
+    # ... and a day later than generation it is still within the limit, so a slow agent is not surprised
+    assert check_authorization(td, now=d["now"] + DAY, peg_deviation_pct=0.1).decision == ActionDecision.APPROVE
+    eth_account = pytest.importorskip("eth_account")
+    from eth_account.messages import encode_typed_data
+    full = {**td, "types": {**td["types"], "EIP712Domain": [
+        {"name": "name", "type": "string"}, {"name": "version", "type": "string"},
+        {"name": "chainId", "type": "uint256"}, {"name": "verifyingContract", "type": "address"}]}}
+    signer = eth_account.Account.recover_message(encode_typed_data(full_message=full), signature=d["signature"])
+    assert signer == td["message"]["from"]

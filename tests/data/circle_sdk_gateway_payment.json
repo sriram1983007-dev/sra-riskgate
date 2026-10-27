@@ -1,0 +1,50 @@
+{
+  "_comment": "Generated offline by Circle @circle-fin/x402-batching 4.0.0 BatchEvmScheme.createPaymentPayload with a throwaway key (0x11..11) on Arc Testnet; now is the generation time.",
+  "now": 1793062037,
+  "typed_data": {
+    "domain": {
+      "name": "GatewayWalletBatched",
+      "version": "1",
+      "chainId": 5042002,
+      "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+    },
+    "types": {
+      "TransferWithAuthorization": [
+        {
+          "name": "from",
+          "type": "address"
+        },
+        {
+          "name": "to",
+          "type": "address"
+        },
+        {
+          "name": "value",
+          "type": "uint256"
+        },
+        {
+          "name": "validAfter",
+          "type": "uint256"
+        },
+        {
+          "name": "validBefore",
+          "type": "uint256"
+        },
+        {
+          "name": "nonce",
+          "type": "bytes32"
+        }
+      ]
+    },
+    "primaryType": "TransferWithAuthorization",
+    "message": {
+      "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "to": "0x2fFb88f73980bC6069c598487396E1e472DEB7eE",
+      "value": "10000",
+      "validAfter": "1793061437",
+      "validBefore": "1793666937",
+      "nonce": "0x40874c77b8d810aefe30540acd9714c3a6bfa724b6294268fbb6c9712316ad95"
+    }
+  },
+  "signature": "0xed755b93cab93f21afaf12c2349d60e70a2dbbab41834cb087a624cb6a26bbef5cf19b009c4e2553e6e87f60ddcf79d42a87c5013cd9cb9a0a207b71e3c93d191b"
+}

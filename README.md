@@ -278,7 +278,7 @@ result = check_authorization(
     typed_data,                          # domain: GatewayWalletBatched, v1, GatewayWallet contract
     sender=agent_address,
     chain_id=5042002,                    # Arc Testnet
-    max_gateway_validity_seconds=7 * 86400,  # default: hold Gateway payments valid for more than 7 days
+    max_gateway_validity_seconds=8 * 86400,  # default: hold Gateway payments valid for more than 8 days
     known_recipients=[seller_address],
 )
 ```
@@ -292,7 +292,7 @@ self-asserted claims). Only the real GatewayWallet is trusted:
 | Domain version `"2"` or a `salt` (Gateway's EURC and cirBTC payments) | `UNSUPPORTED_ASSET` |
 | Any primary type other than `TransferWithAuthorization` | `UNSUPPORTED_SIGNATURE` |
 | Valid for less than three days (Gateway would reject it) | `GATEWAY_VALIDITY_TOO_SHORT` |
-| Valid for longer than `max_gateway_validity_seconds` | `LONG_LIVED_AUTHORIZATION` |
+| Valid for longer than `max_gateway_validity_seconds` (default 8 days; Circle's SDK signs for 7 days plus 100 seconds) | `LONG_LIVED_AUTHORIZATION` |
 
 GatewayWallet is `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE` on Ethereum, Base and Arc, and
 `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` on Base Sepolia and Arc Testnet

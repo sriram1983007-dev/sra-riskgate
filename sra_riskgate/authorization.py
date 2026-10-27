@@ -28,10 +28,16 @@ _AUTH_FIELDS = [("from", "address"), ("to", "address"), ("value", "uint256"), ("
                 ("validBefore", "uint256"), ("nonce", "bytes32")]
 _AUTH_TYPES = {"TransferWithAuthorization", "ReceiveWithAuthorization"}
 DEFAULT_MAX_VALIDITY_SECONDS = 3600
-# Gateway rejects batched authorizations valid for less than three days; its own examples use five.
+# Gateway rejects batched authorizations valid for less than three days (Circle's docs). Circle's own SDK
+# (@circle-fin/x402-batching 4.x) signs them for seven days plus a 100-second buffer, so the default limit
+# leaves a day of room above that.
 GATEWAY_MIN_VALIDITY_SECONDS = 3 * 86400
-DEFAULT_MAX_GATEWAY_VALIDITY_SECONDS = 7 * 86400
+DEFAULT_MAX_GATEWAY_VALIDITY_SECONDS = 8 * 86400
 _CLOCK_SKEW_SECONDS = 60
+
+
+def _duration(seconds: float) -> str:
+    return f"{seconds / 86400:.2f} days" if seconds >= 2 * 86400 else f"{seconds / 3600:.1f} hours"
 
 
 def _hold(flags: list, why: str) -> RiskAssessment:
@@ -104,7 +110,8 @@ def check_authorization(
 
     A Circle Gateway batched payment (domain name ``GatewayWalletBatched``, version ``"1"``, with the
     GatewayWallet contract for that chain as ``verifyingContract``) gets the same checks, except that its
-    validity limit is ``max_gateway_validity_seconds`` (default seven days) instead of
+    validity limit is ``max_gateway_validity_seconds`` (default eight days: Circle's SDK signs for seven
+    days plus 100 seconds) instead of
     ``max_validity_seconds``. A Gateway-named domain with any other contract is ``UNSUPPORTED_ASSET``;
     version ``"2"`` (EURC and cirBTC) is ``UNSUPPORTED_ASSET``; any primary type other than
     ``TransferWithAuthorization`` is ``UNSUPPORTED_SIGNATURE``. A Gateway authorization valid for less
@@ -209,13 +216,15 @@ def check_authorization(
         limit = max_gateway_validity_seconds if gateway else max_validity_seconds
         if lifetime > limit:
             return _hold(["LONG_LIVED_AUTHORIZATION"],
-                         f"it stays valid for {lifetime / 3600:.1f} hours, more than the "
-                         f"{limit / 3600:g}-hour limit{' for Circle Gateway payments' if gateway else ''}; "
+                         (f"it stays valid for {_duration(lifetime)}, more than the {_duration(limit)} limit "
+                          f"for Circle Gateway payments; " if gateway else
+                          f"it stays valid for {lifetime / 3600:.1f} hours, more than the "
+                          f"{limit / 3600:g}-hour limit; ") +
                          f"anyone holding the signature can submit it until then.")
         if gateway and valid_before - t < GATEWAY_MIN_VALIDITY_SECONDS:
             return _hold(["GATEWAY_VALIDITY_TOO_SHORT"],
                          f"Circle Gateway requires a batched authorization to stay valid for at least three "
-                         f"days, and this one expires in {(valid_before - t) / 3600:.1f} hours, so Gateway "
+                         f"days, and this one expires in {_duration(valid_before - t)}, so Gateway "
                          f"would reject it.")
 
         amount = float(Decimal(value) / (Decimal(10) ** USDC_DECIMALS))

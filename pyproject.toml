@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sra-riskgate"
-version = "0.12.1"
+version = "0.13.0"
 description = "Fail-closed checks for AI-agent USDC payments: OFAC SDN match, payee policy, limits, depeg, unsafe token approvals in transactions and x402 signatures, and dispute-window verdicts"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "Sriram Ramakrishnan" }]
 dependencies = ["pydantic>=2.0"]
-keywords = ["stablecoin", "usdc", "payments", "x402", "ai-agents", "agent-safety", "guardrails", "llm", "mcp", "langchain", "crewai", "agentkit", "erc20", "eip-3009", "eip-712", "eip-7702", "base", "arc", "circle", "ofac", "sanctions", "compliance", "risk", "fintech"]
+keywords = ["stablecoin", "usdc", "payments", "x402", "ai-agents", "agent-safety", "guardrails", "llm", "mcp", "langchain", "crewai", "agentkit", "erc20", "eip-3009", "eip-712", "eip-7702", "base", "arc", "circle", "circle-gateway", "nanopayments", "ofac", "sanctions", "compliance", "risk", "fintech"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",

@@ -5,6 +5,11 @@ In x402's ``exact`` scheme on EVM chains the agent never sends a transaction. It
 expires. ``check_transaction`` cannot see this path, so ``check_authorization`` checks the typed data
 itself: that it is a USDC authorization on a supported chain, from the right wallet, valid only for a short
 time, and then runs the decoded payment through ``check_payment`` with your policy. Fails closed.
+
+Circle Gateway's batched x402 payments (nanopayments) are recognised too: the same
+``TransferWithAuthorization``, signed for the ``GatewayWalletBatched`` domain with Circle's GatewayWallet
+contract as ``verifyingContract``. It draws on the payer's Gateway balance, and Gateway requires it to stay
+valid for at least three days, so it gets its own validity limit (``max_gateway_validity_seconds``).
 """
 from __future__ import annotations
 
@@ -13,7 +18,8 @@ import time
 from decimal import Decimal
 from typing import Any, Mapping, Optional
 
-from sra_riskgate.chains import USDC_ADDRESSES, USDC_DECIMALS, is_usdc
+from sra_riskgate.chains import (GATEWAY_BATCHED_DOMAIN, GATEWAY_WALLET_ADDRESSES, USDC_ADDRESSES, USDC_DECIMALS,
+                                 is_gateway_wallet, is_usdc)
 from sra_riskgate.check import _verdict, check_payment
 from sra_riskgate.models import ActionDecision, RiskAssessment
 from sra_riskgate.transaction import _POLICY_KEYS, _UNLIMITED, _int, _same
@@ -22,6 +28,9 @@ _AUTH_FIELDS = [("from", "address"), ("to", "address"), ("value", "uint256"), ("
                 ("validBefore", "uint256"), ("nonce", "bytes32")]
 _AUTH_TYPES = {"TransferWithAuthorization", "ReceiveWithAuthorization"}
 DEFAULT_MAX_VALIDITY_SECONDS = 3600
+# Gateway rejects batched authorizations valid for less than three days; its own examples use five.
+GATEWAY_MIN_VALIDITY_SECONDS = 3 * 86400
+DEFAULT_MAX_GATEWAY_VALIDITY_SECONDS = 7 * 86400
 _CLOCK_SKEW_SECONDS = 60
 
 
@@ -67,6 +76,7 @@ def check_authorization(
     chain_id: Optional[int] = None,
     now: Optional[float] = None,
     max_validity_seconds: float = DEFAULT_MAX_VALIDITY_SECONDS,
+    max_gateway_validity_seconds: float = DEFAULT_MAX_GATEWAY_VALIDITY_SECONDS,
     **policy: Any,
 ) -> RiskAssessment:
     """Check EIP-712 typed data before the agent signs it. Never raises; anything unexpected becomes HOLD.
@@ -91,6 +101,15 @@ def check_authorization(
       agent has moved on.
     * ``INVALID_AUTHORIZATION`` for missing or malformed fields, or a ``types`` definition that is not
       the USDC one.
+
+    A Circle Gateway batched payment (domain name ``GatewayWalletBatched``, version ``"1"``, with the
+    GatewayWallet contract for that chain as ``verifyingContract``) gets the same checks, except that its
+    validity limit is ``max_gateway_validity_seconds`` (default seven days) instead of
+    ``max_validity_seconds``. A Gateway-named domain with any other contract is ``UNSUPPORTED_ASSET``;
+    version ``"2"`` (EURC and cirBTC) is ``UNSUPPORTED_ASSET``; any primary type other than
+    ``TransferWithAuthorization`` is ``UNSUPPORTED_SIGNATURE``. A Gateway authorization valid for less
+    than three days is ``GATEWAY_VALIDITY_TOO_SHORT``: Gateway would reject it, so it is held rather than
+    signed for nothing.
 
     Only sign if ``result.decision`` is ``ActionDecision.APPROVE``.
     """
@@ -124,7 +143,21 @@ def check_authorization(
         if dom_chain not in USDC_ADDRESSES:
             return _hold(["UNSUPPORTED_CHAIN"], f"chain {dom_chain} is not checked.")
         contract = domain.get("verifyingContract")
-        if not is_usdc(dom_chain, contract):
+        gateway = domain.get("name") == GATEWAY_BATCHED_DOMAIN
+        if gateway:
+            if not is_gateway_wallet(dom_chain, contract):
+                return _hold(["UNSUPPORTED_ASSET"],
+                             f"it names Circle Gateway's {GATEWAY_BATCHED_DOMAIN} domain but is for contract "
+                             f"{contract}, not Circle's GatewayWallet on chain {dom_chain} "
+                             f"({GATEWAY_WALLET_ADDRESSES[dom_chain]}).")
+            if str(domain.get("version")) != "1" or domain.get("salt") is not None:
+                return _hold(["UNSUPPORTED_ASSET"],
+                             f"only USDC Gateway payments (domain version \"1\", no salt) are checked; this is "
+                             f"version {domain.get('version')!r}, which Gateway uses for EURC and cirBTC.")
+            if primary != "TransferWithAuthorization":
+                return _hold(["UNSUPPORTED_SIGNATURE"],
+                             f"only TransferWithAuthorization is checked on the Gateway domain; this is {primary}.")
+        elif not is_usdc(dom_chain, contract):
             return _hold(["UNSUPPORTED_ASSET"],
                          f"it is for contract {contract}, which is not the USDC contract on chain {dom_chain} "
                          f"({USDC_ADDRESSES[dom_chain]}).")
@@ -173,11 +206,17 @@ def check_authorization(
             return _hold(["AUTHORIZATION_NOT_YET_VALID"],
                          f"validAfter {valid_after} is in the future, so this is a post-dated payment.")
         lifetime = valid_before - max(t, valid_after)
-        if lifetime > max_validity_seconds:
+        limit = max_gateway_validity_seconds if gateway else max_validity_seconds
+        if lifetime > limit:
             return _hold(["LONG_LIVED_AUTHORIZATION"],
                          f"it stays valid for {lifetime / 3600:.1f} hours, more than the "
-                         f"{max_validity_seconds / 3600:g}-hour limit; anyone holding the signature can "
-                         f"submit it until then.")
+                         f"{limit / 3600:g}-hour limit{' for Circle Gateway payments' if gateway else ''}; "
+                         f"anyone holding the signature can submit it until then.")
+        if gateway and valid_before - t < GATEWAY_MIN_VALIDITY_SECONDS:
+            return _hold(["GATEWAY_VALIDITY_TOO_SHORT"],
+                         f"Circle Gateway requires a batched authorization to stay valid for at least three "
+                         f"days, and this one expires in {(valid_before - t) / 3600:.1f} hours, so Gateway "
+                         f"would reject it.")
 
         amount = float(Decimal(value) / (Decimal(10) ** USDC_DECIMALS))
         return check_payment(chain_id=dom_chain, sender=frm, recipient=to, amount=amount, **policy)

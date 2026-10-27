@@ -18,6 +18,23 @@ USDC_ADDRESSES: dict[int, str] = {
 NATIVE_USDC_CHAINS: frozenset[int] = frozenset({5042, 5042002})
 NATIVE_USDC_DECIMALS = 18
 
+# Circle Gateway's GatewayWallet contract, the verifyingContract of Gateway's batched x402 payments
+# (EIP-712 domain "GatewayWalletBatched"). Same address on every mainnet, and another on every testnet.
+# Source: https://developers.circle.com/gateway/references/contract-addresses
+_GATEWAY_MAINNET = "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+_GATEWAY_TESTNET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+GATEWAY_WALLET_ADDRESSES: dict[int, str] = {
+    1: _GATEWAY_MAINNET, 8453: _GATEWAY_MAINNET, 5042: _GATEWAY_MAINNET,
+    84532: _GATEWAY_TESTNET, 5042002: _GATEWAY_TESTNET,
+}
+GATEWAY_BATCHED_DOMAIN = "GatewayWalletBatched"
+
+
+def is_gateway_wallet(chain_id: Optional[int], contract: object) -> bool:
+    expected = GATEWAY_WALLET_ADDRESSES.get(chain_id) if chain_id is not None else None
+    return bool(expected) and str(contract).lower() == expected.lower()
+
+
 # Legacy (x402 v1) network names
 LEGACY_NETWORKS: dict[str, int] = {
     "ethereum": 1,

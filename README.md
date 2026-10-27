@@ -263,6 +263,41 @@ interface at `0x3600000000000000000000000000000000000000` moves the same balance
 Circle recommends the ERC-20 interface for balances and transfers. Mixing the two decimal scales is the most likely
 integration bug on Arc, so the native path is covered by its own tests.
 
+## Circle Gateway batched x402 payments (0.13.0+)
+
+[Circle Gateway](https://developers.circle.com/gateway/nanopayments) settles x402 payments in batches: the agent
+deposits USDC into Gateway once, then pays each request by signing the same EIP-3009 `TransferWithAuthorization`,
+but for Gateway's own EIP-712 domain (`GatewayWalletBatched`, version `"1"`) with Circle's GatewayWallet contract as
+`verifyingContract`. Gateway requires these signatures to stay valid for **at least three days**, so the one-hour
+limit above would hold every one of them.
+
+`check_authorization` recognises Gateway payments on every supported chain and gives them their own limit:
+
+```python
+result = check_authorization(
+    typed_data,                          # domain: GatewayWalletBatched, v1, GatewayWallet contract
+    sender=agent_address,
+    chain_id=5042002,                    # Arc Testnet
+    max_gateway_validity_seconds=7 * 86400,  # default: hold Gateway payments valid for more than 7 days
+    known_recipients=[seller_address],
+)
+```
+
+The decoded payment gets every other check (sanctions, blocklist, known payees, amount ceiling, depeg,
+self-asserted claims). Only the real GatewayWallet is trusted:
+
+| Situation | Flag |
+|---|---|
+| Named `GatewayWalletBatched` but `verifyingContract` is not Circle's GatewayWallet on that chain | `UNSUPPORTED_ASSET` |
+| Domain version `"2"` or a `salt` (Gateway's EURC and cirBTC payments) | `UNSUPPORTED_ASSET` |
+| Any primary type other than `TransferWithAuthorization` | `UNSUPPORTED_SIGNATURE` |
+| Valid for less than three days (Gateway would reject it) | `GATEWAY_VALIDITY_TOO_SHORT` |
+| Valid for longer than `max_gateway_validity_seconds` | `LONG_LIVED_AUTHORIZATION` |
+
+GatewayWallet is `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE` on Ethereum, Base and Arc, and
+`0x0077777d7EBA4688BDeF3E311b846F25870A19B9` on Base Sepolia and Arc Testnet
+([Circle's contract addresses](https://developers.circle.com/gateway/references/contract-addresses)).
+
 ## Dispute verdicts: check the window (0.10.0+)
 
 On the published benchmark, SRA-RiskGate-4B misjudges whether a dispute was filed inside the policy's

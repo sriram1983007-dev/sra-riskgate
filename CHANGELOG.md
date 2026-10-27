@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.0 — 2026-10-26
+
+### Added
+- **Circle Gateway batched x402 payments.** `check_authorization` recognises a `TransferWithAuthorization`
+  signed for Gateway's `GatewayWalletBatched` domain (version `"1"`) with Circle's GatewayWallet contract as
+  `verifyingContract`, on Ethereum, Base, Base Sepolia, Arc and Arc Testnet. Gateway requires these to stay valid
+  for at least three days, so they have their own limit, `max_gateway_validity_seconds` (default seven days),
+  instead of being held by the one-hour limit; the decoded payment gets every other check. A Gateway-named
+  domain with any other contract, version `"2"` (EURC, cirBTC), or another primary type is held, and a Gateway
+  authorization valid for less than three days is held as `GATEWAY_VALIDITY_TOO_SHORT`.
+- `sra_riskgate.chains.GATEWAY_WALLET_ADDRESSES` and `is_gateway_wallet()`.
+
 ## 0.12.1 — 2026-10-25
 
 ### Fixed

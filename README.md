@@ -6,6 +6,7 @@
 [![Model](https://img.shields.io/badge/🤗%20Model-SRA--RiskGate--4B-yellow)](https://huggingface.co/sriram1983007/SRA-RiskGate-4B)
 [![Results](https://img.shields.io/badge/🤗%20Results-Reproducible-brightgreen)](https://huggingface.co/datasets/sriram1983007/sra-bench-results)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb)
+[![Paper DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23715017.svg)](https://doi.org/10.5281/zenodo.23715017)
 
 Risk checks for stablecoin and AI-agent payments.
 
@@ -454,7 +455,8 @@ on the full-precision model, not the quantizations). To reproduce the paper's nu
 
 ## Reproduce the paper
 
-The paper ([`paper/SRA-RiskGate-paper.pdf`](paper/SRA-RiskGate-paper.pdf)) reports numbers computed from
+The paper ([`paper/SRA-RiskGate-paper.pdf`](paper/SRA-RiskGate-paper.pdf), preprint on Zenodo:
+[doi:10.5281/zenodo.23715017](https://doi.org/10.5281/zenodo.23715017)) reports numbers computed from
 published files. Download them once (about 90 MB):
 
 ```bash
@@ -490,6 +492,22 @@ pytest -q
 Every push and pull request runs the test suite on GitHub Actions. Before publishing to PyPI,
 build the wheel, install it in a fresh virtual environment and run the tests against the
 installed package.
+
+## Citing
+
+If you use the benchmark, the model or the library, please cite the paper:
+
+```bibtex
+@misc{ramakrishnan2026srariskgate,
+  author    = {Ramakrishnan, Sriram},
+  title     = {{SRA-RiskGate}: A Benchmark and a {4B} Model for Gating Stablecoin Payments Made by {AI} Agents,
+               and the Checks the Model Still Needs},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.23715017},
+  url       = {https://doi.org/10.5281/zenodo.23715017},
+}
+```
 
 ## License
 

@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, the benchmark or the model, please cite the paper."
+title: "sra-riskgate"
+authors:
+  - family-names: Ramakrishnan
+    given-names: Sriram
+    affiliation: Independent Researcher
+repository-code: "https://github.com/sriram1983007-dev/sra-riskgate"
+license: Apache-2.0
+preferred-citation:
+  type: article
+  title: "SRA-RiskGate: A Benchmark and a 4B Model for Gating Stablecoin Payments Made by AI Agents, and the Checks the Model Still Needs"
+  authors:
+    - family-names: Ramakrishnan
+      given-names: Sriram
+      affiliation: Independent Researcher
+  year: 2026
+  publisher:
+    name: Zenodo
+  doi: "10.5281/zenodo.23715017"
+  url: "https://doi.org/10.5281/zenodo.23715017"

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.0 — 2026-10-27
+
+### Added
+- **Circle Wallets (developer-controlled).** `check_circle_request(operation, body, ...)` checks a request before
+  it is sent to Circle's API, which signs as soon as it accepts it: transfers (USDC by token address or a
+  configured Circle token id, and native USDC on Arc) go through `check_payment`; contract executions are rebuilt
+  into calldata and go through `check_transaction` (so `approve` is held); `sign/typedData` goes through
+  `check_authorization` (x402, Circle Gateway, Permit); `sign/transaction` through `check_transaction` (including
+  EIP-7702). `sign/message` and wallet upgrades are held. Accepts plain dicts or the official SDK's request
+  models.
+- `guard_circle_wallets(api, ...)` wraps the SDK's `TransactionsApi` / `SigningApi` so money-moving and signing
+  calls are sent only on approve, raising `CircleRequestBlocked` otherwise; read-only calls pass through.
+- `pip install "sra-riskgate[circle]"` installs `circle-developer-controlled-wallets`.
+
 ## 0.13.1 — 2026-10-26
 
 ### Fixed

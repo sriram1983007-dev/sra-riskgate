@@ -299,6 +299,48 @@ GatewayWallet is `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE` on Ethereum, Base 
 `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` on Base Sepolia and Arc Testnet
 ([Circle's contract addresses](https://developers.circle.com/gateway/references/contract-addresses)).
 
+## Circle Wallets: check the request before Circle signs it (0.14.0+)
+
+With [Circle Wallets](https://developers.circle.com/wallets/dev-controlled) (developer-controlled), the agent never
+holds a key: it asks Circle's API to transfer, call a contract or sign, and Circle signs as soon as it accepts the
+request. So the check runs on the request body, before it is sent. Wrap the SDK's API objects and give the agent
+only the wrapped ones:
+
+```python
+from circle.web3 import developer_controlled_wallets as dcw, utils
+from sra_riskgate import CircleRequestBlocked, guard_circle_wallets
+
+client = utils.init_developer_controlled_wallets_client(api_key=..., entity_secret=...)
+policy = dict(
+    wallets={"<wallet id>": "0x<that wallet's address>"},  # from your Circle console, never from the agent
+    known_recipients=[seller_address],
+    max_amount=25,
+)
+transactions = guard_circle_wallets(dcw.TransactionsApi(client), **policy)
+signing = guard_circle_wallets(dcw.SigningApi(client), **policy)
+
+try:
+    transactions.create_developer_transaction_transfer(request)  # sent only on approve
+except CircleRequestBlocked as e:
+    print(e.assessment.flags, e.assessment.explanation)        # nothing reached Circle
+```
+
+Or check a body yourself with `check_circle_request(operation, body, **policy)`, which takes the JSON body as a dict
+or an SDK request model and returns the usual `RiskAssessment`.
+
+| Request | How it is checked |
+|---|---|
+| `transactions/transfer` | USDC (by `tokenAddress`, or a Circle `tokenId` you list in `usdc_token_ids`) and native USDC on Arc go through `check_payment`; amounts are rounded up to a whole micro-USDC. Other tokens, NFTs and native sends elsewhere are held |
+| `transactions/contractExecution` | Rebuilt into calldata (`abiFunctionSignature` + `abiParameters`, or `callData`) and checked with `check_transaction`: only a USDC `transfer` is approved; `approve` is `TOKEN_APPROVAL` (plus `UNLIMITED_APPROVAL`); native value with a call is held |
+| `sign/typedData` | `check_authorization`: x402, Circle Gateway (own validity limit), `Permit` held |
+| `sign/transaction` | `check_transaction` on the JSON transaction, including EIP-7702 delegations; raw serialised transactions are held |
+| `sign/message`, `transactions/walletUpgrade` | Held: a raw message can authorise anything, and an upgrade changes the code that controls the wallet |
+
+The wallet's address comes from `wallets` (or `sender=`), and its chain from the body's `blockchain` (Circle names
+such as `ARC-TESTNET`, `BASE`, `ETH`) or `chain=`; a request whose wallet or chain does not match, or that names a wallet id you did
+not list in `wallets`, is held (`WALLET_MISMATCH`, `UNKNOWN_WALLET`). Read-only SDK calls pass through unchanged. The SDK is optional:
+`pip install "sra-riskgate[circle]"`.
+
 ## Dispute verdicts: check the window (0.10.0+)
 
 On the published benchmark, SRA-RiskGate-4B misjudges whether a dispute was filed inside the policy's

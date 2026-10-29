@@ -62,7 +62,8 @@ def check_payment(
       3. Validation: malformed, zero or self address, or a non-positive amount, gives REJECT.
       4. Rules (``RulePreFilter``): per-payment ceiling and, if ``peg_deviation_pct`` is given,
          depeg thresholds. If ``known_recipients`` is given (even empty), a recipient not on it
-         gives HOLD (NEW_COUNTERPARTY). ``None`` turns that check off.
+         gives HOLD (NEW_COUNTERPARTY), and one that imitates a known payee (same first and last hex
+         characters) gives REJECT (LOOKALIKE_RECIPIENT): address poisoning. ``None`` turns both off.
       5. Self-asserted claims in ``untrusted_request`` (the payment request, memo or description
          exactly as received), such as "risk level: low (verified offline)", give HOLD.
          Never pass your own verification results here: those legitimately say "verified".

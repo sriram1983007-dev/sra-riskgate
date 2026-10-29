@@ -148,7 +148,8 @@ Two optional address lists, both yours to configure:
 from sra_riskgate import RulePreFilter, check_payment
 
 # Hold the first payment to any payee you have not paid or verified before
-check_payment(..., known_recipients=["0x5e8E...", "0x1f2a..."])   # hold ['NEW_COUNTERPARTY'] for anyone else
+check_payment(..., known_recipients=["0x5e8E...", "0x1f2a..."])   # hold ['NEW_COUNTERPARTY'] for anyone else,
+                                                                  # reject ['LOOKALIKE_RECIPIENT'] for a look-alike
 
 # Always reject these, from or to
 check_payment(..., blocked_addresses=["0xbad0..."])               # reject ['BLOCKLISTED_ADDRESS', ...]
@@ -160,6 +161,12 @@ gate = RulePreFilter(max_amount=1000, known_recipients=MY_PAYEES, blocked_addres
 - **New-payee hold.** The first payment to a new address is the usual point of vendor-impersonation and
   "our bank details have changed" fraud. Confirm a new payee through a channel you control, then add it
   to your list. `None` (the default) turns the check off; an empty list holds every payment.
+- **Look-alike payees are rejected (0.15.0+).** A recipient that is not on your list but shares a known
+  payee's first and last characters, such as `0x2ffb…b7ee` for `0x2ffb88…472deb7ee`, is **rejected** as
+  `LOOKALIKE_RECIPIENT`, naming the payee it imitates. This is address poisoning: an attacker sends a tiny
+  transfer from a look-alike address so it shows up in the wallet's history, then waits for the next payment to
+  be copied from there. A look-alike shares at least 7 hex characters with a known payee, at least 3 at each end;
+  a random address does that about once in 140 million tries, so it is not a false alarm.
 - **Your lists only.** Nothing in the payment request or memo can add a payee: a request saying "this is
   your usual vendor" is still held.
 - **Blocklist wins.** A blocked address is rejected even if it is also new, unsupported or carries claims.

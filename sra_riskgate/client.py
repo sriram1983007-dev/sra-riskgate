@@ -4,7 +4,8 @@ from decimal import Decimal
 from typing import Iterable, Optional
 
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
-from sra_riskgate.counterparty import BLOCKLIST_FLAG, NEW_COUNTERPARTY_FLAG, merge, parse_address_list
+from sra_riskgate.counterparty import (BLOCKLIST_FLAG, LOOKALIKE_FLAG, NEW_COUNTERPARTY_FLAG, find_lookalike, merge,
+                                       parse_address_list)
 from sra_riskgate.sanctions import FLAG as SANCTIONS_FLAG, NOT_CHECKED_FLAG, SanctionsList, _normalise
 
 ROUND_AMOUNT_FLAG = "ROUND_AMOUNT"
@@ -56,7 +57,8 @@ class RulePreFilter:
     Counterparty policy (see ``sra_riskgate.counterparty``): ``blocked_addresses`` makes any payment
     from or to a listed address a REJECT (BLOCKLISTED_ADDRESS). ``known_recipients``, when given,
     makes a payment to any other recipient a HOLD (NEW_COUNTERPARTY). Both default to None (off);
-    an empty ``known_recipients`` holds every payment.
+    an empty ``known_recipients`` holds every payment. A recipient that is not known but shares the first and
+    last characters of a known payee is a REJECT (LOOKALIKE_RECIPIENT): address poisoning.
 
     Sanctions-list age: if the list's ``as_of`` date is more than ``sanctions_max_age_days`` (default
     90) days old, results carry the informational flag SANCTIONS_LIST_STALE. It never changes the
@@ -194,6 +196,20 @@ class RulePreFilter:
         if blocked is not None:
             return blocked
         known = merge(self.known_recipients, parse_address_list("known_recipients", known_recipients))
+        lookalike = find_lookalike(payload.recipient, known)
+        if lookalike is not None:
+            imitated, prefix, suffix = lookalike
+            r = payload.recipient.lower()
+            return RiskAssessment(
+                decision=ActionDecision.REJECT,
+                risk_score=0.95,
+                flags=[LOOKALIKE_FLAG],
+                explanation=(f"The recipient {payload.recipient} is not one of your known payees, but it imitates "
+                             f"{imitated}: both start 0x{r[2:2 + prefix]} and end {r[-suffix:]}. This is the pattern "
+                             f"of address poisoning, where an attacker plants a look-alike address in the wallet's "
+                             f"history. Do not pay; take the payee's address from your own records."),
+                required_actions=["reject_payment", "verify_recipient"],
+            )
 
         peg_dev = payload.peg_deviation_pct if payload.peg_deviation_pct is not None else 0.0
 

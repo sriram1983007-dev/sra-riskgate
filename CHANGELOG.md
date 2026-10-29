@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.0 — 2026-10-28
+
+### Added
+- **Address-poisoning check.** With `known_recipients` set, a recipient that is not known but imitates a known
+  payee (at least 7 matching hex characters, at least 3 at each end, such as `0x2ffb…b7ee` for
+  `0x2ffb88…472deb7ee`) is a REJECT, `LOOKALIKE_RECIPIENT`, naming the payee it imitates and the matching ends.
+  Attackers plant such addresses in a wallet's history with tiny transfers and wait for the next payment to be
+  copied from there. A random address matches this way about once in 140 million tries per known payee. Runs
+  after the sanctions and blocklist checks, in every check that pays (`check_payment`, `check_transaction`,
+  `check_authorization`, `check_circle_request`, the MCP server). `sra_riskgate.counterparty.find_lookalike()`.
+
+### Changed
+- Sanctions list re-checked against the upstream OFAC extract on 2026-10-28: unchanged since 2026-10-01
+  (124 EVM addresses), so the bundled list is current.
+
 ## 0.14.0 — 2026-10-27
 
 ### Added

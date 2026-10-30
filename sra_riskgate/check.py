@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
+from sra_riskgate.account_code import check_account_code
 from sra_riskgate.chains import USDC_ADDRESSES
 from sra_riskgate.client import DEFAULT_SANCTIONS_MAX_AGE_DAYS, RulePreFilter
 from sra_riskgate.counterparty import parse_address_list
@@ -48,6 +49,8 @@ def check_payment(
     known_recipients: Optional[Iterable[str]] = None,
     blocked_addresses: Optional[Iterable[str]] = None,
     sanctions_max_age_days: Optional[int] = DEFAULT_SANCTIONS_MAX_AGE_DAYS,
+    account_code: Any = None,
+    expected_delegates: Optional[Iterable[str]] = None,
 ) -> RiskAssessment:
     """Check a USDC payment before sending it. Never raises on bad payment data; anything unexpected becomes HOLD.
 
@@ -57,6 +60,9 @@ def check_payment(
          turns it off. It is an exact address match against a dated snapshot, not a screening service.
          A list older than ``sanctions_max_age_days`` adds the informational flag SANCTIONS_LIST_STALE.
       1b. Blocklist: sender or recipient in ``blocked_addresses`` gives REJECT (BLOCKLISTED_ADDRESS).
+      1c. The sender's own account: if ``account_code`` (its ``eth_getCode`` result) is given and is an EIP-7702
+          delegation designator (0xef0100 + address) to a contract not in ``expected_delegates``, HOLD
+          (ACCOUNT_DELEGATED): someone else may control the account.
       2. Supported asset and chain: USDC on Ethereum (1), Base (8453), Base Sepolia (84532),
          Arc (5042) or Arc Testnet (5042002), otherwise HOLD.
       3. Validation: malformed, zero or self address, or a non-positive amount, gives REJECT.
@@ -96,6 +102,14 @@ def check_payment(
         blocked = gate.screen_blocklist(sender, recipient, blocked_addresses)
         if blocked is not None:
             return blocked
+        if account_code is not None:
+            try:
+                compromised = check_account_code(account_code, expected_delegates=expected_delegates)
+            except ValueError as e:
+                return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
+                                f"The risk gate is misconfigured: {_first_error(e)}", ["fix_configuration"])
+            if compromised is not None:
+                return compromised
 
         if not isinstance(token, str) or token.strip().upper() != "USDC":
             return _verdict(ActionDecision.HOLD, ["UNSUPPORTED_ASSET"],

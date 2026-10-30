@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.0 — 2026-10-29
+
+### Added
+- **Already-delegated accounts are held.** `check_payment` (and so `check_transaction`, `check_authorization` and
+  `check_circle_request`) takes an optional `account_code`, the paying account's `eth_getCode` result, and
+  `expected_delegates`. If the code is an EIP-7702 delegation designator (`0xef0100` + address) to a contract not
+  in `expected_delegates`, every payment is held as `ACCOUNT_DELEGATED`, naming the delegate: an authorization
+  signed outside the guarded client leaves exactly this trace. Plain accounts and ordinary contract wallets pass;
+  unreadable code is held (`INVALID_ACCOUNT_CODE`). The SDK still never calls an RPC; you pass the code in.
+  New `check_account_code()` and `delegate_from_code()`. Suggested by Carlos (Bloqarl) on DEV.to.
+
 ## 0.15.0 — 2026-10-28
 
 ### Added

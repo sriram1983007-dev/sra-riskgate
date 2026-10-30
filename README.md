@@ -218,6 +218,24 @@ way agent wallets are drained, so it is never approved here. `decode_erc20_trans
 and the [GitHub Action](https://github.com/sriram1983007-dev/sra-riskgate-action) (`payload`) hold the
 same kinds of transaction, with less specific flags.
 
+## Is the paying account still yours? (0.16.0+)
+
+An EIP-7702 authorization signed anywhere else (another app, a phished signature, a leaked key) delegates the
+account to a contract, and the guard in this process never sees it. It does leave a trace: `eth_getCode` on the
+account returns `0xef0100` followed by the delegate's address. Read the code before each payment and pass it in:
+
+```python
+code = w3.eth.get_code(agent_address)          # web3.py; viem: await client.getCode({ address })
+result = check_transaction(tx, account_code=code, expected_delegates=[])   # or check_payment / check_authorization
+```
+
+If the account is delegated to a contract that is not in `expected_delegates`, every payment is held as
+`ACCOUNT_DELEGATED`, naming the delegate, with `stop_signing` in the required actions. A plain account (no code)
+and an ordinary smart-contract wallet pass; list your wallet provider's smart-account implementation in
+`expected_delegates` if you delegated to it on purpose. The checks stay offline: you read the code, the SDK
+judges it. `check_account_code(code)` and `delegate_from_code(code)` are available on their own. Suggested by
+Carlos (Bloqarl) on DEV.to.
+
 ## Check an x402 signature before signing (0.11.0+)
 
 In x402's `exact` scheme the agent does not send a transaction: it signs an EIP-3009

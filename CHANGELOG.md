@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.16.1 — 2026-10-30
+
+### Fixed
+- **A delegated account now outranks an approval hold.** `check_transaction` and `check_authorization` used to
+  report an `approve()` or a permit from an account already delegated under EIP-7702 as `TOKEN_APPROVAL` only;
+  it is now `ACCOUNT_DELEGATED` with `stop_signing`, because the account itself may no longer be yours. A REJECT
+  (sanctions, blocklist, look-alike payee) still wins.
+- **Account code can be bound to the account it was read from.** `account_code` may be a mapping
+  `{address: code}`; if it does not contain the paying account, the payment is held as `ACCOUNT_CODE_MISMATCH`,
+  so code read from the wrong address cannot vouch for this one. Passing the code on its own works as before.
+- **`expected_delegates` is validated even without `account_code`.** A malformed list is a `CONFIGURATION_ERROR`
+  straight away instead of going unnoticed until code is passed in.
+
+Found in an audit of 0.16.0.
+
 ## 0.16.0 — 2026-10-29
 
 ### Added

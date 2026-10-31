@@ -33,4 +33,4 @@ __all__ = [
     "SanctionsList",
     "is_sanctioned",
 ]
-__version__ = "0.16.0"
+__version__ = "0.16.1"

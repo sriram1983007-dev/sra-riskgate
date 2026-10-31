@@ -88,3 +88,58 @@ def test_real_designator_from_eth_account():
         else "0xef0100" + str(signed.address).lower().removeprefix("0x")
     assert delegate_from_code(code) == DELEGATE
     assert pay(account_code=code).flags == ["ACCOUNT_DELEGATED"]
+
+
+# ---- 0.16.1: the three audit fixes -------------------------------------------------------------------------------
+UNLIMITED = 2**256 - 1
+
+
+def _approve_tx():
+    data = "0x095ea7b3" + ("1" * 40).zfill(64) + format(UNLIMITED, "064x")
+    return {"to": USDC_ADDRESSES[8453], "data": data, "chainId": 8453, "from": ME}
+
+
+def _permit():
+    return {"primaryType": "Permit",
+            "domain": {"name": "USD Coin", "version": "2", "chainId": 8453, "verifyingContract": USDC_ADDRESSES[8453]},
+            "message": {"owner": ME, "spender": "0x" + "1" * 40, "value": str(UNLIMITED), "nonce": 0,
+                        "deadline": 2**40}}
+
+
+def test_delegated_account_outranks_approval_holds():
+    """A compromised account says 'stop signing', which matters more than 'this is an approval'."""
+    r = check_transaction(_approve_tx(), account_code=DESIGNATOR)
+    assert r.flags == ["ACCOUNT_DELEGATED"] and "stop_signing" in r.required_actions
+    r = check_authorization(_permit(), account_code=DESIGNATOR)
+    assert r.flags == ["ACCOUNT_DELEGATED"] and "stop_signing" in r.required_actions
+    # with a clean account the approval is still held as an approval
+    assert check_transaction(_approve_tx(), account_code="0x").flags == ["TOKEN_APPROVAL", "UNLIMITED_APPROVAL"]
+    assert check_authorization(_permit(), account_code="0x").flags[0] == "TOKEN_APPROVAL"
+
+
+def test_reject_still_outranks_a_delegated_account():
+    r = pay(account_code=DESIGNATOR, blocked_addresses=[PAYEE])
+    assert r.decision == ActionDecision.REJECT
+
+
+def test_account_code_can_be_bound_to_the_sender():
+    assert pay(account_code={ME: "0x"}).decision == ActionDecision.APPROVE
+    assert pay(account_code={ME.upper().replace("0X", "0x"): DESIGNATOR}).flags == ["ACCOUNT_DELEGATED"]
+    r = pay(account_code={"0x" + "b" * 40: "0x"})            # code read from another account
+    assert r.decision == ActionDecision.HOLD and r.flags == ["ACCOUNT_CODE_MISMATCH"]
+    assert check_transaction(_approve_tx(), account_code={"0x" + "b" * 40: "0x"}).flags == ["ACCOUNT_CODE_MISMATCH"]
+    r = pay(account_code={"not-an-address": "0x"})
+    assert r.decision == ActionDecision.REJECT and r.flags == ["CONFIGURATION_ERROR"]
+
+
+@pytest.mark.parametrize("bad", ["0xabc", ["0xabc"], "0x" + "e" * 40])
+def test_bad_expected_delegates_is_caught_even_without_code(bad):
+    """A typo in expected_delegates used to pass silently until the day code was passed in."""
+    r = pay(expected_delegates=bad)
+    assert r.decision == ActionDecision.REJECT and r.flags == ["CONFIGURATION_ERROR"]
+    r = check_authorization(_permit(), expected_delegates=bad)
+    assert r.decision == ActionDecision.REJECT and r.flags == ["CONFIGURATION_ERROR"]
+
+
+def test_good_expected_delegates_without_code_changes_nothing():
+    assert pay(expected_delegates=[OK_DELEGATE]).decision == ActionDecision.APPROVE

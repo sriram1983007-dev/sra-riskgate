@@ -14,6 +14,7 @@ from typing import Any, Mapping, Optional
 from sra_riskgate.chains import (NATIVE_USDC_CHAINS, NATIVE_USDC_DECIMALS, USDC_ADDRESSES, USDC_DECIMALS,
                                   is_usdc)
 from sra_riskgate.check import _verdict, check_payment
+from sra_riskgate.account_code import account_hold, outranks
 from sra_riskgate.models import ActionDecision, RiskAssessment
 
 TRANSFER = "a9059cbb"          # transfer(address,uint256)
@@ -161,7 +162,30 @@ def check_transaction(
       ``TRANSACTION_MISMATCH`` (``from`` or ``chainId`` disagree with the arguments).
 
     Only sign the transaction if ``result.decision`` is ``ActionDecision.APPROVE``.
+
+    A compromised paying account (``account_code`` showing an unexpected EIP-7702 delegation) outranks every
+    HOLD, including approvals: the verdict is then ``ACCOUNT_DELEGATED`` with ``stop_signing``. A REJECT stays.
     """
+    result = _check_transaction(tx, chain_id=chain_id, sender=sender, **policy)
+    if result.flags == ["CONFIGURATION_ERROR"] or not ("account_code" in policy or "expected_delegates" in policy):
+        return result
+    try:
+        account = account_hold(sender if sender is not None else (tx.get("from") if isinstance(tx, Mapping) else None), policy.get("account_code"), policy.get("expected_delegates"))
+    except ValueError as e:
+        return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
+                        f"The risk gate is misconfigured: {e}", ["fix_configuration"])
+    except Exception:
+        return result
+    return outranks(account, result)
+
+
+def _check_transaction(
+    tx: Mapping[str, Any],
+    *,
+    chain_id: Optional[int] = None,
+    sender: Optional[str] = None,
+    **policy: Any,
+) -> RiskAssessment:
     unknown = sorted(set(policy) - _POLICY_KEYS)
     if unknown:
         return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],

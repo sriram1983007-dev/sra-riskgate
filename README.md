@@ -236,6 +236,13 @@ and an ordinary smart-contract wallet pass; list your wallet provider's smart-ac
 judges it. `check_account_code(code)` and `delegate_from_code(code)` are available on their own. Suggested by
 Carlos (Bloqarl) on DEV.to.
 
+From 0.16.1:
+- A delegated account outranks every other hold: an approval or permit signed from it is reported as
+  `ACCOUNT_DELEGATED` (stop signing), not just `TOKEN_APPROVAL`. A REJECT (sanctions, blocklist, look-alike) stays a REJECT.
+- Pass `account_code={agent_address: code}` to bind the code to the account it was read from. If it is not for the
+  paying account, the payment is held (`ACCOUNT_CODE_MISMATCH`).
+- `expected_delegates` is validated even when no code is passed, so a typo is a `CONFIGURATION_ERROR` straight away.
+
 ## Check an x402 signature before signing (0.11.0+)
 
 In x402's `exact` scheme the agent does not send a transaction: it signs an EIP-3009

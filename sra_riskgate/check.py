@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
-from sra_riskgate.account_code import check_account_code
+from sra_riskgate.account_code import account_hold
 from sra_riskgate.chains import USDC_ADDRESSES
 from sra_riskgate.client import DEFAULT_SANCTIONS_MAX_AGE_DAYS, RulePreFilter
 from sra_riskgate.counterparty import parse_address_list
@@ -62,7 +62,9 @@ def check_payment(
       1b. Blocklist: sender or recipient in ``blocked_addresses`` gives REJECT (BLOCKLISTED_ADDRESS).
       1c. The sender's own account: if ``account_code`` (its ``eth_getCode`` result) is given and is an EIP-7702
           delegation designator (0xef0100 + address) to a contract not in ``expected_delegates``, HOLD
-          (ACCOUNT_DELEGATED): someone else may control the account.
+          (ACCOUNT_DELEGATED): someone else may control the account. ``account_code`` may also be a mapping
+          ``{address: code}``; then it must contain the sender (else HOLD, ACCOUNT_CODE_MISMATCH).
+          ``expected_delegates`` is validated even without ``account_code``.
       2. Supported asset and chain: USDC on Ethereum (1), Base (8453), Base Sepolia (84532),
          Arc (5042) or Arc Testnet (5042002), otherwise HOLD.
       3. Validation: malformed, zero or self address, or a non-positive amount, gives REJECT.
@@ -92,6 +94,7 @@ def check_payment(
         try:
             known_recipients = parse_address_list("known_recipients", known_recipients)
             blocked_addresses = parse_address_list("blocked_addresses", blocked_addresses)
+            compromised = account_hold(sender, account_code, expected_delegates)
         except ValueError as e:
             return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
                             f"The risk gate is misconfigured: {_first_error(e)}", ["fix_configuration"])
@@ -102,14 +105,8 @@ def check_payment(
         blocked = gate.screen_blocklist(sender, recipient, blocked_addresses)
         if blocked is not None:
             return blocked
-        if account_code is not None:
-            try:
-                compromised = check_account_code(account_code, expected_delegates=expected_delegates)
-            except ValueError as e:
-                return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
-                                f"The risk gate is misconfigured: {_first_error(e)}", ["fix_configuration"])
-            if compromised is not None:
-                return compromised
+        if compromised is not None:
+            return compromised
 
         if not isinstance(token, str) or token.strip().upper() != "USDC":
             return _verdict(ActionDecision.HOLD, ["UNSUPPORTED_ASSET"],

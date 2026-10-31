@@ -13,9 +13,9 @@ Suggested by Carlos (Bloqarl) on DEV.to.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
-from sra_riskgate.counterparty import parse_address_list
+from sra_riskgate.counterparty import _normalise, parse_address_list
 from sra_riskgate.models import ActionDecision, RiskAssessment
 
 DELEGATION_DESIGNATOR = "ef0100"
@@ -72,3 +72,43 @@ def check_account_code(code: Any, *, expected_delegates: Optional[Iterable[str]]
                      f"everything the account holds, so the account may no longer be yours alone. Stop all payments "
                      f"and signatures from it until a person has checked."),
         required_actions=["manual_review", "stop_signing"])
+
+
+MISMATCH_FLAG = "ACCOUNT_CODE_MISMATCH"
+
+
+def account_hold(sender: Any, account_code: Any, expected_delegates: Optional[Iterable[str]]) -> Optional[RiskAssessment]:
+    """The account-code verdict for ``sender``: a HOLD, or None if the account is fine or no code was given.
+
+    ``expected_delegates`` is validated even when no code is passed, so a typo in it can never go unnoticed;
+    a malformed list raises ValueError (callers turn that into a CONFIGURATION_ERROR). ``account_code`` may be the
+    code itself, or a mapping ``{address: code}``: then the code must be for ``sender``, so code read from the wrong
+    account cannot vouch for this one (``ACCOUNT_CODE_MISMATCH``).
+    """
+    expected = parse_address_list("expected_delegates", expected_delegates)
+    if account_code is None:
+        return None
+    if isinstance(account_code, Mapping):
+        by_address = {}
+        for address, code in account_code.items():
+            n = _normalise(address)
+            if n is None:
+                raise ValueError(f"account_code has a key that is not an EVM address: {address!r}.")
+            by_address[n] = code
+        who = _normalise(sender)
+        if who is None or who not in by_address:
+            listed = ", ".join(sorted(by_address)) or "no address"
+            return RiskAssessment(
+                decision=ActionDecision.HOLD, risk_score=0.65, flags=[MISMATCH_FLAG],
+                explanation=(f"The account code passed in is for {listed}, not for the paying account {sender}, so "
+                             f"it says nothing about this account; the payment is held."),
+                required_actions=["manual_review"])
+        account_code = by_address[who]
+    return check_account_code(account_code, expected_delegates=expected)
+
+
+def outranks(account: Optional[RiskAssessment], result: RiskAssessment) -> RiskAssessment:
+    """A compromised account outranks every HOLD (it also means: stop signing); a REJECT stays a REJECT."""
+    if account is None or result.decision == ActionDecision.REJECT or account.flags == result.flags:
+        return result
+    return account

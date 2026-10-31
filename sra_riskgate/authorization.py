@@ -21,6 +21,7 @@ from typing import Any, Mapping, Optional
 from sra_riskgate.chains import (GATEWAY_BATCHED_DOMAIN, GATEWAY_WALLET_ADDRESSES, USDC_ADDRESSES, USDC_DECIMALS,
                                  is_gateway_wallet, is_usdc)
 from sra_riskgate.check import _verdict, check_payment
+from sra_riskgate.account_code import account_hold, outranks
 from sra_riskgate.models import ActionDecision, RiskAssessment
 from sra_riskgate.transaction import _POLICY_KEYS, _UNLIMITED, _int, _same
 
@@ -75,6 +76,19 @@ def _is_bytes32(n: Any) -> bool:
         return False
 
 
+def _signer(typed_data: Any) -> Any:
+    """The account that would sign: the message's ``from`` (transfers) or ``owner`` (permits), if readable."""
+    try:
+        if isinstance(typed_data, (str, bytes, bytearray)):
+            typed_data = json.loads(typed_data)
+        message = typed_data.get("message") if isinstance(typed_data, Mapping) else None
+        if isinstance(message, Mapping):
+            return message.get("from", message.get("owner"))
+    except Exception:
+        pass
+    return None
+
+
 def check_authorization(
     typed_data: Any,
     *,
@@ -119,7 +133,33 @@ def check_authorization(
     signed for nothing.
 
     Only sign if ``result.decision`` is ``ActionDecision.APPROVE``.
+
+    A compromised paying account (``account_code`` showing an unexpected EIP-7702 delegation) outranks every
+    HOLD, including approvals: the verdict is then ``ACCOUNT_DELEGATED`` with ``stop_signing``. A REJECT stays.
     """
+    result = _check_authorization(typed_data, sender=sender, chain_id=chain_id, now=now, max_validity_seconds=max_validity_seconds, max_gateway_validity_seconds=max_gateway_validity_seconds, **policy)
+    if result.flags == ["CONFIGURATION_ERROR"] or not ("account_code" in policy or "expected_delegates" in policy):
+        return result
+    try:
+        account = account_hold(sender if sender is not None else _signer(typed_data), policy.get("account_code"), policy.get("expected_delegates"))
+    except ValueError as e:
+        return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
+                        f"The risk gate is misconfigured: {e}", ["fix_configuration"])
+    except Exception:
+        return result
+    return outranks(account, result)
+
+
+def _check_authorization(
+    typed_data: Any,
+    *,
+    sender: Optional[str] = None,
+    chain_id: Optional[int] = None,
+    now: Optional[float] = None,
+    max_validity_seconds: float = DEFAULT_MAX_VALIDITY_SECONDS,
+    max_gateway_validity_seconds: float = DEFAULT_MAX_GATEWAY_VALIDITY_SECONDS,
+    **policy: Any,
+) -> RiskAssessment:
     unknown = sorted(set(policy) - _POLICY_KEYS)
     if unknown:
         return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],

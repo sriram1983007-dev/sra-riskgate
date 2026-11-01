@@ -218,6 +218,38 @@ way agent wallets are drained, so it is never approved here. `decode_erc20_trans
 and the [GitHub Action](https://github.com/sriram1983007-dev/sra-riskgate-action) (`payload`) hold the
 same kinds of transaction, with less specific flags.
 
+## Smart accounts: check the UserOperation before signing (0.17.0+)
+
+Agents with a smart account (Coinbase Smart Wallet, CDP smart accounts, Safe, Kernel, Nexus, SimpleAccount) sign an
+ERC-4337 UserOperation, not a transaction, and its `callData` can bundle several calls. A check on the outer
+transaction never sees them, so an unlimited `approve()` can ride along with an ordinary payment.
+`check_user_operation` decodes the calls the account will make and checks each one:
+
+```python
+from sra_riskgate import ActionDecision, check_user_operation
+
+user_op = {...}   # the UserOperation the owner is about to sign, as your bundler client prepared it
+result = check_user_operation(user_op, chain_id=8453,
+                              known_recipients=[payee], max_amount=50.0,
+                              expected_paymasters=[cdp_paymaster])   # optional
+if result.decision != ActionDecision.APPROVE:
+    raise RuntimeError(f"not signing: {result.flags} {result.explanation}")
+```
+
+- Every inner call goes through `check_transaction`: a USDC transfer gets the full payment check; approvals,
+  permits, other contracts and native ETH are held, naming the call (`call 2 of 3`).
+- Payments to the same payee are summed across the batch (`BATCH_TOTAL`), so a payment cannot be split under
+  the limit.
+- Held: calls from the account to itself (`ACCOUNT_SELF_CALL`, they can change owners or modules),
+  delegatecalls (`DELEGATECALL`, except a Safe batch through MultiSendCallOnly, which is decoded), unreadable
+  callData (`UNSUPPORTED_ACCOUNT_CALL`), deploying the account in the same operation (`ACCOUNT_DEPLOYMENT`, unless
+  `allow_account_deployment=True`), an EIP-7702 authorization inside the operation (`CODE_DELEGATION`), and a
+  paymaster not in `expected_paymasters` (`UNKNOWN_PAYMASTER`).
+- Supported account interfaces: `execute` / `executeBatch` (Coinbase Smart Wallet, Solady, Simple7702,
+  SimpleAccount v0.6 and v0.7), ERC-7579 `execute(bytes32,bytes)` (Kernel v3, Nexus, Safe7579) and the Safe 4337
+  module. Decoding is tested against callData produced by viem and permissionless for all seven account types.
+  `decode_account_calls(call_data)` returns the calls on their own.
+
 ## Is the paying account still yours? (0.16.0+)
 
 An EIP-7702 authorization signed anywhere else (another app, a phished signature, a leaked key) delegates the

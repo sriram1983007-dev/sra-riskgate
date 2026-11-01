@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.17.0 — 2026-11-01
+
+### Added
+- **Smart accounts: `check_user_operation(user_op, chain_id=..., **policy)`.** Agents with a smart account sign an
+  ERC-4337 UserOperation whose `callData` can bundle several calls; until now the SDK could not see inside it.
+  The calls are decoded and each goes through `check_transaction`, so a USDC transfer gets the full payment check
+  and an approval, permit, other contract or native ETH send is held, naming the call (`call 2 of 3`). Payments to
+  the same payee are summed across the batch (`BATCH_TOTAL`). Also held: calls to the account itself
+  (`ACCOUNT_SELF_CALL`), delegatecalls (`DELEGATECALL`; a Safe batch through MultiSendCallOnly is decoded),
+  unreadable callData (`UNSUPPORTED_ACCOUNT_CALL`), deploying the account in the same operation
+  (`ACCOUNT_DEPLOYMENT`, unless `allow_account_deployment=True`), an EIP-7702 authorization in the operation
+  (`CODE_DELEGATION`) and, with `expected_paymasters`, any other paymaster (`UNKNOWN_PAYMASTER`).
+- Supported account interfaces: `execute` / `executeBatch` (Coinbase Smart Wallet, Solady, Simple7702,
+  SimpleAccount v0.6 and v0.7), ERC-7579 `execute(bytes32,bytes)` (Kernel v3, Biconomy Nexus, Safe7579) and the
+  Safe 4337 module (`executeUserOp`, `executeUserOpWithErrorString`). `decode_account_calls()` on its own.
+- Tests use callData produced by viem 2.57 and permissionless 0.5 for all seven account types
+  (`tests/data/smart_account_calldata.json`).
+
 ## 0.16.1 — 2026-10-30
 
 ### Fixed

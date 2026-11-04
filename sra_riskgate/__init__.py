@@ -41,4 +41,4 @@ __all__ = [
     "verify_gateway_balances",
     "SettlementCheck",
 ]
-__version__ = "0.18.0"
+__version__ = "0.18.1"

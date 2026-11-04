@@ -41,7 +41,7 @@ def verify(rc, **kw):
 def test_exact_payment_is_verified():
     r = verify(receipt(transfer(AGENT, PAYEE, 10_000)))
     assert r.verified and r.flags == [] and r.block_number == 53339258
-    assert r.transfers == [{"from": AGENT.lower(), "to": PAYEE.lower(), "amount_usdc": "0.01"}]
+    assert r.transfers == [{"from": AGENT.lower(), "to": PAYEE.lower(), "amount": "0.01", "amount_usdc": "0.01"}]
     assert "exactly 0.01 USDC" in r.explanation
 
 
@@ -157,3 +157,48 @@ def test_gateway_other_activity_only_makes_it_larger():
                                 {"payer_after": "-0.01"}])
 def test_gateway_bad_input(kw):
     assert gw(**kw).flags == ["CONFIGURATION_ERROR"]
+
+
+# 0.19.0: any ERC-20 by contract address and decimals, e.g. USDG on Robinhood Chain (chain 4663)
+USDG = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+LENDER = "0x" + "be" * 20
+
+
+def usdg(rc, **kw):
+    kw.setdefault("chain_id", 4663)
+    kw.setdefault("token", USDG)
+    kw.setdefault("decimals", 6)
+    kw.setdefault("symbol", "USDG")
+    kw.setdefault("payee", LENDER)
+    kw.setdefault("amount", "25")
+    return verify(rc, **kw)
+
+
+def test_other_token_on_another_chain():
+    r = usdg(receipt(transfer(AGENT, LENDER, 25_000_000, token=USDG)))
+    assert r.verified and "exactly 25 USDG" in r.explanation
+    assert r.transfers == [{"from": AGENT.lower(), "to": LENDER, "amount": "25"}]
+
+
+def test_other_token_wrong_amount_and_usdc_transfer_ignored():
+    rc = receipt(transfer(AGENT, LENDER, 24_000_000, token=USDG), transfer(AGENT, LENDER, 25_000_000))
+    r = usdg(rc)
+    assert r.flags == ["SETTLEMENT_AMOUNT_MISMATCH"] and "24 USDG" in r.explanation
+
+
+def test_other_token_decimals_matter():
+    rc = receipt(transfer(AGENT, LENDER, 25 * 10**18, token=USDG))
+    assert usdg(rc, decimals=18).verified
+    assert usdg(rc).flags == ["SETTLEMENT_AMOUNT_MISMATCH"]
+
+
+@pytest.mark.parametrize("kw", [{"decimals": None}, {"token": None}, {"decimals": -1}, {"decimals": 37},
+                                {"decimals": True}, {"decimals": 6.0}, {"token": "0x123"},
+                                {"amount": "0.0000001"}, {"chain_id": "4663"}])
+def test_other_token_bad_arguments(kw):
+    assert usdg(receipt(transfer(AGENT, LENDER, 25_000_000, token=USDG)), **kw).flags == ["CONFIGURATION_ERROR"]
+
+
+def test_unknown_chain_without_token_says_how_to_check():
+    r = verify(receipt(transfer(AGENT, PAYEE, 10_000)), chain_id=4663)
+    assert r.flags == ["UNSUPPORTED_CHAIN"] and "token=" in r.explanation

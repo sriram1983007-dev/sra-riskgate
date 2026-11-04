@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.0 — 2026-11-04
+
+### Added
+- **`verify_settlement` checks any ERC-20 on any EVM chain.** Pass `token=` (the contract address) and `decimals=`
+  (read from the token's own `decimals()`), and optionally `symbol=` for the explanation, to verify a payment in
+  another stablecoin, for example USDG on Robinhood Chain (chain 4663). Without them it checks USDC as before. Each
+  transfer in the result now also carries `amount` (USDC results keep `amount_usdc`). Asked for by a public audit
+  of an agent's USDG loan repayment on Robinhood Chain.
+
 ## 0.18.1 — 2026-11-04
 
 - The source distribution now includes `CHANGELOG.md`, so the published package carries its own change history

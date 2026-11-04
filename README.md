@@ -463,6 +463,10 @@ check = verify_gateway_balances(amount="0.01", payer_before="0.09", payer_after=
                                 payee_before="0.01", payee_after="0.02")
 ```
 
+From 0.19.0 any ERC-20 on any EVM chain can be checked: pass its contract address and decimals, for example
+`verify_settlement(receipt, chain_id=4663, token=USDG_ADDRESS, decimals=6, symbol="USDG", payer=..., payee=...,
+amount="25")` for USDG on Robinhood Chain. Read `decimals()` from the token contract yourself.
+
 `GATEWAY_PAYEE_NOT_CREDITED` usually just means Gateway has not settled the batch yet. Both functions are
 offline: the SDK never calls an RPC or an API.
 

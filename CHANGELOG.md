@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.1 — 2026-11-04
+
+- The source distribution now includes `CHANGELOG.md`, so the published package carries its own change history
+  instead of pointing to GitHub. No code changes. Found in Audit #12.
+- A packaging test checks that `CHANGELOG.md` and every file under `tests/` are covered by `MANIFEST.in`.
+
 ## 0.18.0 — 2026-11-03
 
 ### Added

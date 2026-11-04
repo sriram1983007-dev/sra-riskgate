@@ -17,10 +17,10 @@ ME, YOU = "0x" + "a" * 40, "0x" + "b" * 40
 BASE_SEPOLIA = "eip155:84532"
 
 
-def req(amount="5000000", network=BASE_SEPOLIA, asset=None, pay_to=YOU):
+def req(amount="5000000", network=BASE_SEPOLIA, asset=None, pay_to=YOU, timeout=60, extra=None):
     chain = int(network.split(":")[1]) if network.startswith("eip155:") else 84532
     return PaymentRequirements(scheme="exact", network=network, asset=asset or USDC_ADDRESSES.get(chain, "0x" + "c" * 40),
-                               amount=amount, pay_to=pay_to, max_timeout_seconds=60)
+                               amount=amount, pay_to=pay_to, max_timeout_seconds=timeout, extra=extra or {})
 
 
 def payload(requirements, payer=ME):
@@ -205,3 +205,23 @@ def test_sanctioned_pay_to_is_rejected():
     hooks = RiskGateX402Hooks(on_decision=lambda *a: seen.append(a))
     assert "sra_riskgate_reject" in run_verify(hooks, req(pay_to=listed))
     assert "OFAC_SDN_MATCH" in repr(seen)
+
+
+# 0.18.0: the server's maxTimeoutSeconds
+def test_one_hour_timeout_passes():
+    assert run_verify(RiskGateX402Hooks(), req(timeout=3600)) == "passed"
+
+
+def test_long_timeout_is_aborted():
+    out = run_verify(RiskGateX402Hooks(), req(timeout=30 * 86400))
+    assert "sra_riskgate_long_timeout" in out
+
+
+def test_long_timeout_can_be_allowed_by_raising_the_limit():
+    assert run_verify(RiskGateX402Hooks(max_timeout_seconds=31 * 86400), req(timeout=30 * 86400)) == "passed"
+
+
+def test_gateway_requirement_passes_with_its_seven_day_timeout():
+    from sra_riskgate.chains import GATEWAY_WALLET_ADDRESSES
+    extra = {"name": "GatewayWalletBatched", "version": "1", "verifyingContract": GATEWAY_WALLET_ADDRESSES[84532]}
+    assert run_verify(RiskGateX402Hooks(), req(timeout=604900, extra=extra)) == "passed"

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.18.0 — 2026-11-03
+
+### Added
+- **Check what actually settled: `verify_settlement(receipt, chain_id=..., payer=..., payee=..., amount=...)`.**
+  The other checks run before signing; this one runs after, on the mined receipt you already fetched. Verified
+  only if the transaction succeeded and contains exactly one USDC `Transfer` from the payer to the payee for
+  exactly the approved amount, and, with `authorization_nonce`, the `AuthorizationUsed` event of the approved
+  EIP-3009 / x402 authorization. Only the payer's own USDC events are read, so it works for a plain transfer, an
+  x402 settlement, a facilitator's batch or an ERC-4337 bundle. Otherwise `verified=False` with a flag:
+  `SETTLEMENT_FAILED`, `SETTLEMENT_NOT_FOUND`, `SETTLEMENT_AMOUNT_MISMATCH`, `SETTLEMENT_PAYEE_MISMATCH`,
+  `DUPLICATE_SETTLEMENT`, `UNEXPECTED_TRANSFER` (unless `allow_other_transfers=True`, for a known fee),
+  `AUTHORIZATION_NOT_USED`, `INVALID_RECEIPT`. Accepts JSON-RPC receipts and web3.py receipts alike.
+- **Circle Gateway settlement: `verify_gateway_balances(amount=..., payer_before=..., payer_after=...,
+  payee_before=..., payee_after=...)`.** Gateway settles batched payments later and together, so there is no
+  single receipt; this checks that the payer's Gateway balance went down, and the payee's up, by at least the
+  amount. `GATEWAY_PAYEE_NOT_CREDITED` usually means the batch has not settled yet.
+- **The x402 server's `maxTimeoutSeconds` is checked: `check_x402_timeout()`, and in `RiskGateX402Hooks`.** A
+  server asking for a signature valid longer than one hour is held before the agent signs (`LONG_TIMEOUT_REQUESTED`,
+  abort reason `sra_riskgate_long_timeout`), so the request is stopped, not just the signature. Circle Gateway
+  requirements (`extra.name` `GatewayWalletBatched`), which ask for 7 days by design, get the Gateway limit, but
+  only when `extra.verifyingContract` is Circle's GatewayWallet on that chain. New hook arguments
+  `max_timeout_seconds` and `max_gateway_timeout_seconds`. Suggested by Carlos (Bloqarl) on DEV.to.
+
+### Changed
+- **Clock tolerance at the signature-lifetime limit.** An authorization signed for exactly the limit by a signer
+  whose clock runs up to 60 seconds ahead is no longer held as `LONG_LIVED_AUTHORIZATION` (the same 60-second
+  tolerance already applied to `validAfter`). In a day of real x402 settlements on Base mainnet, 14 of 1,476
+  were signed for exactly one hour, right at the default limit. Raised by Dipankar Sarkar on Hugging Face.
+
+Every 0.18.0 check is offline: you pass in the receipt or the balances; the SDK still never calls an RPC.
+
 ## 0.17.0 — 2026-11-01
 
 ### Added

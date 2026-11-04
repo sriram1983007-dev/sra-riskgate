@@ -225,3 +225,16 @@ def test_input_is_not_modified():
     before = copy.deepcopy(td)
     check(td, known_recipients=[OTHER])
     assert td == before
+
+
+# 0.18.0: a signer whose clock runs a little ahead, signing for exactly the one-hour limit, is not held.
+@pytest.mark.parametrize("lifetime,held", [(3600, False), (3630, False), (3660, False), (3661, True), (7200, True)])
+def test_one_hour_edge_allows_clock_skew(lifetime, held):
+    r = check(auth(validBefore=str(NOW + lifetime)))
+    assert (r.flags == ["LONG_LIVED_AUTHORIZATION"]) is held
+
+
+def test_backdated_one_hour_window_passes():
+    # Real Base traffic: validAfter 10 minutes back, validBefore one hour ahead (a 70-minute window).
+    r = check(auth(validAfter=str(NOW - 600), validBefore=str(NOW + 3600)))
+    assert r.decision == ActionDecision.APPROVE

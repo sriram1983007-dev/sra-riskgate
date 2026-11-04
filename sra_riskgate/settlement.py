@@ -87,6 +87,20 @@ def _usdc(micro: int) -> str:
     return f"{Decimal(micro) / _MICRO:f}".rstrip("0").rstrip(".") or "0"
 
 
+def _units(amount: Any, decimals: int, symbol: str) -> int:
+    try:
+        d = Decimal(str(amount)) * (Decimal(10) ** decimals)
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValueError(f"amount {amount!r} is not a number")
+    if not d.is_finite() or d <= 0 or d != d.to_integral_value():
+        raise ValueError(f"amount {amount!r} must be a positive {symbol} amount with at most {decimals} decimals")
+    return int(d)
+
+
+def _fmt(units: int, decimals: int) -> str:
+    return f"{Decimal(units) / (Decimal(10) ** decimals):f}".rstrip("0").rstrip(".") or "0"
+
+
 def verify_settlement(
     receipt: Any,
     *,
@@ -96,18 +110,24 @@ def verify_settlement(
     amount: Any,
     authorization_nonce: Optional[str] = None,
     allow_other_transfers: bool = False,
+    token: Optional[str] = None,
+    decimals: Optional[int] = None,
+    symbol: Optional[str] = None,
 ) -> SettlementCheck:
-    """Check a mined receipt for exactly the approved USDC payment.
+    """Check a mined receipt for exactly the approved payment: USDC by default, or any ERC-20 you name.
 
     Args:
         receipt: The ``eth_getTransactionReceipt`` result, as JSON (hex strings) or as web3.py returns it.
-        chain_id: The chain the payment was made on (Base, Base Sepolia, Ethereum or Arc).
+        chain_id: The chain the payment was made on. For USDC: Base, Base Sepolia, Ethereum or Arc.
         payer, payee: The addresses the gate approved.
-        amount: The approved amount in USDC (``0.01``, ``"0.01"`` or a ``Decimal``).
+        amount: The approved amount in whole tokens (``0.01``, ``"25"`` or a ``Decimal``).
         authorization_nonce: For an EIP-3009 / x402 payment, the authorization's nonce: its
             ``AuthorizationUsed`` event must be in the receipt too.
-        allow_other_transfers: Accept other USDC transfers out of the payer in the same transaction, such as a
-            facilitator fee taken alongside the payment. Off by default: anything else the payer sent is reported.
+        allow_other_transfers: Accept other transfers of the token out of the payer in the same transaction, such
+            as a facilitator fee taken alongside the payment. Off by default: anything else the payer sent is reported.
+        token, decimals: Check another ERC-20 instead of USDC, on any EVM chain: its contract address and its
+            ``decimals()`` (read them from the token contract yourself; both are required together). For example
+            USDG on Robinhood Chain (chain 4663). ``symbol`` only names the token in explanations.
 
     Flags when not verified: ``INVALID_RECEIPT``, ``UNSUPPORTED_CHAIN``, ``CONFIGURATION_ERROR``,
     ``SETTLEMENT_FAILED`` (the transaction reverted), ``SETTLEMENT_NOT_FOUND``, ``SETTLEMENT_AMOUNT_MISMATCH``,
@@ -116,15 +136,27 @@ def verify_settlement(
     try:
         try:
             payer_a, payee_a = _address(payer), _address(payee)
-            micro = _micro(amount)
+            if (token is None) != (decimals is None):
+                raise ValueError("token and decimals must be given together")
+            if token is not None:
+                if isinstance(decimals, bool) or not isinstance(decimals, int) or not 0 <= decimals <= 36:
+                    raise ValueError(f"decimals {decimals!r} must be a whole number from 0 to 36")
+                contract, dec, sym = _address(token), decimals, str(symbol or "tokens")
+            else:
+                contract, dec, sym = None, USDC_DECIMALS, "USDC"
+            units = _units(amount, dec, sym)
             nonce = _hex(authorization_nonce) if authorization_nonce is not None else None
             if nonce is not None and len(nonce) != 66:
                 raise ValueError("authorization_nonce must be 32 bytes of hex")
+            if isinstance(chain_id, bool) or not isinstance(chain_id, int):
+                raise ValueError(f"chain_id {chain_id!r} must be a number")
         except ValueError as e:
             return _fail("CONFIGURATION_ERROR", f"{e}.")
-        if chain_id not in USDC_ADDRESSES:
-            return _fail("UNSUPPORTED_CHAIN", f"chain {chain_id} is not checked.")
-        usdc = USDC_ADDRESSES[chain_id].lower()
+        if contract is None:
+            if chain_id not in USDC_ADDRESSES:
+                return _fail("UNSUPPORTED_CHAIN", f"chain {chain_id} has no known USDC contract; pass token= and "
+                                                  f"decimals= to check another token.")
+            contract = USDC_ADDRESSES[chain_id].lower()
 
         if not isinstance(receipt, Mapping) and not hasattr(receipt, "get"):
             return _fail("INVALID_RECEIPT", "the receipt is not a mapping.")
@@ -143,41 +175,45 @@ def verify_settlement(
         nonce_used = False
         for lg in logs:
             try:
-                if _hex(lg.get("address")) != usdc:
+                if _hex(lg.get("address")) != contract:
                     continue
                 topics = [_hex(t) for t in (lg.get("topics") or [])]
                 if len(topics) == 3 and topics[0] == TRANSFER_TOPIC and _topic_address(topics[1]) == payer_a:
                     data = lg.get("data")
-                    sent.append({"from": payer_a, "to": _topic_address(topics[2]),
-                                 "amount_usdc": _usdc(_int(_hex(data) if data not in (None, "") else "0x0")),
-                                 "micro": _int(_hex(data) if data not in (None, "") else "0x0")})
+                    raw = _int(_hex(data) if data not in (None, "") else "0x0")
+                    entry = {"from": payer_a, "to": _topic_address(topics[2]), "amount": _fmt(raw, dec),
+                             "units": raw}
+                    if sym == "USDC" and dec == USDC_DECIMALS:
+                        entry["amount_usdc"] = entry["amount"]
+                    sent.append(entry)
                 elif (nonce is not None and len(topics) == 3 and topics[0] == AUTHORIZATION_USED_TOPIC
                       and _topic_address(topics[1]) == payer_a and topics[2] == nonce):
                     nonce_used = True
             except (AttributeError, TypeError, ValueError):
-                return _fail("INVALID_RECEIPT", "a USDC log in the receipt could not be read.", block_number=block)
+                return _fail("INVALID_RECEIPT", f"a {sym} log in the receipt could not be read.", block_number=block)
 
-        public = [{k: v for k, v in t.items() if k != "micro"} for t in sent]
+        public = [{k: v for k, v in t.items() if k != "units"} for t in sent]
         common = {"block_number": block, "transfers": public}
+        want = _fmt(units, dec)
         to_payee = [t for t in sent if t["to"] == payee_a]
-        exact = [t for t in to_payee if t["micro"] == micro]
+        exact = [t for t in to_payee if t["units"] == units]
         if not exact:
             if to_payee:
-                got = ", ".join(t["amount_usdc"] for t in to_payee)
+                got = ", ".join(t["amount"] for t in to_payee)
                 return _fail("SETTLEMENT_AMOUNT_MISMATCH",
-                             f"the payee received {got} USDC from the payer, not the approved {_usdc(micro)}.", **common)
+                             f"the payee received {got} {sym} from the payer, not the approved {want}.", **common)
             if sent:
-                where = ", ".join(f"{t['amount_usdc']} USDC to {t['to']}" for t in sent)
+                where = ", ".join(f"{t['amount']} {sym} to {t['to']}" for t in sent)
                 return _fail("SETTLEMENT_PAYEE_MISMATCH",
-                             f"the payer's USDC went elsewhere ({where}), not to {payee_a}.", **common)
+                             f"the payer's {sym} went elsewhere ({where}), not to {payee_a}.", **common)
             return _fail("SETTLEMENT_NOT_FOUND",
-                         f"the receipt has no USDC transfer from {payer_a} at all.", **common)
+                         f"the receipt has no {sym} transfer from {payer_a} at all.", **common)
         if len(exact) > 1:
             return _fail("DUPLICATE_SETTLEMENT",
-                         f"the payee was paid {_usdc(micro)} USDC {len(exact)} times in this transaction.", **common)
+                         f"the payee was paid {want} {sym} {len(exact)} times in this transaction.", **common)
         others = [t for t in sent if t is not exact[0]]
         if others and not allow_other_transfers:
-            where = ", ".join(f"{t['amount_usdc']} USDC to {t['to']}" for t in others)
+            where = ", ".join(f"{t['amount']} {sym} to {t['to']}" for t in others)
             return _fail("UNEXPECTED_TRANSFER",
                          f"besides the approved payment the payer also sent {where} in the same transaction "
                          f"(pass allow_other_transfers=True if that is an expected fee).", **common)
@@ -188,7 +224,7 @@ def verify_settlement(
         where = f" in block {block}" if block is not None else ""
         return SettlementCheck(
             verified=True, flags=[], **common,
-            explanation=(f"Verified: the transaction succeeded{where} and moved exactly {_usdc(micro)} USDC "
+            explanation=(f"Verified: the transaction succeeded{where} and moved exactly {want} {sym} "
                          f"from {payer_a} to {payee_a}"
                          + (", by the approved authorization." if nonce is not None else ".")))
     except Exception as e:  # fail closed

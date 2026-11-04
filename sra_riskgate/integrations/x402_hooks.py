@@ -22,6 +22,8 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Optional
 
+from sra_riskgate.authorization import (DEFAULT_MAX_GATEWAY_VALIDITY_SECONDS, DEFAULT_MAX_VALIDITY_SECONDS,
+                                        check_x402_timeout)
 from sra_riskgate.chains import USDC_DECIMALS, chain_id_from_network, is_usdc
 from sra_riskgate.client import RulePreFilter
 from sra_riskgate.models import ActionDecision, TransactionPayload
@@ -43,6 +45,7 @@ REASON_UNSUPPORTED = "sra_riskgate_unsupported_asset"
 REASON_PEG_FEED = "sra_riskgate_peg_feed_error"
 REASON_ERROR = "sra_riskgate_internal_error"
 REASON_CLAIMS = "sra_riskgate_payload_claims"
+REASON_TIMEOUT = "sra_riskgate_long_timeout"
 
 
 class RiskGateX402Hooks:
@@ -63,6 +66,9 @@ class RiskGateX402Hooks:
         check_payload_claims: Hold payments whose requirements (``extra``) contain self-asserted
             verification claims such as "risk level: low (verified offline)" (default True).
         on_decision: Optional ``callable(dict)`` called with every decision, for logging or audit.
+        max_timeout_seconds: Hold requirements whose ``maxTimeoutSeconds`` (how long the server asks the
+            signature to stay valid) is longer than this (default 3600). Circle Gateway requirements get
+            ``max_gateway_timeout_seconds`` instead (default 8 days), since Gateway asks for 7 days by design.
     """
 
     def __init__(
@@ -78,6 +84,8 @@ class RiskGateX402Hooks:
         payer_address: Optional[str] = None,
         on_decision: Optional[Callable[[dict], None]] = None,
         check_payload_claims: bool = True,
+        max_timeout_seconds: float = DEFAULT_MAX_VALIDITY_SECONDS,
+        max_gateway_timeout_seconds: float = DEFAULT_MAX_GATEWAY_VALIDITY_SECONDS,
     ):
         self.gate = gate or RulePreFilter(
             max_amount=max_amount, depeg_hold_pct=depeg_hold_pct, depeg_reject_pct=depeg_reject_pct
@@ -88,6 +96,8 @@ class RiskGateX402Hooks:
         self.payer_address = payer_address
         self.on_decision = on_decision
         self.check_payload_claims = check_payload_claims
+        self.max_timeout_seconds = max_timeout_seconds
+        self.max_gateway_timeout_seconds = max_gateway_timeout_seconds
 
     # ------------------------------------------------------------------ hooks
     def before_verify(self, ctx: Any) -> Optional[AbortResult]:
@@ -158,6 +168,18 @@ class RiskGateX402Hooks:
 
             if not payer:
                 return self._abort(stage, REASON_INVALID, "Payer address is unknown.", detail)
+
+            timeout = getattr(requirements, "max_timeout_seconds", None)
+            if timeout is not None:
+                held = check_x402_timeout(timeout, chain_id=chain_id, extra=getattr(requirements, "extra", None),
+                                          max_validity_seconds=self.max_timeout_seconds,
+                                          max_gateway_validity_seconds=self.max_gateway_timeout_seconds)
+                if held is not None:
+                    detail.update(flags=held.flags, max_timeout_seconds=str(timeout))
+                    if self.block_on_hold or "LONG_TIMEOUT_REQUESTED" not in held.flags:
+                        return self._abort(stage, REASON_TIMEOUT if "LONG_TIMEOUT_REQUESTED" in held.flags
+                                           else REASON_INVALID, held.explanation, detail)
+                    self._record(stage, "hold", None, {**detail, "message": held.explanation})
 
             if self.check_payload_claims:
                 claims = scan_payload_claims(getattr(requirements, "extra", None) or {})

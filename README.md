@@ -429,6 +429,43 @@ and outcome accuracy rises from 77.8% to 78.7% (escalations count as misses). Re
 `python eval/dispute_window_check.py test.jsonl predictions.jsonl` on the files in
 [sra-bench-results](https://huggingface.co/datasets/sriram1983007/sra-bench-results).
 
+## After settlement: check what actually arrived (0.18.0+)
+
+A payment the gate approved is not a receipt until the chain says so. `verify_settlement` reads the mined
+receipt you fetched with `eth_getTransactionReceipt` and checks that exactly the approved payment arrived:
+
+```python
+from sra_riskgate import verify_settlement
+
+receipt = w3.eth.get_transaction_receipt(tx_hash)       # or the raw JSON-RPC result
+check = verify_settlement(
+    receipt, chain_id=84532,
+    payer=AGENT, payee=PAYEE, amount="0.01",             # what the gate approved
+    authorization_nonce=nonce,                           # optional: for an EIP-3009 / x402 payment
+)
+assert check.verified, check.explanation
+```
+
+Verified only when the transaction succeeded and holds exactly one USDC `Transfer` from the payer to the payee
+for exactly the approved amount (and, with `authorization_nonce`, that authorization's `AuthorizationUsed`
+event). Otherwise `verified` is False with a flag: `SETTLEMENT_FAILED`, `SETTLEMENT_NOT_FOUND`,
+`SETTLEMENT_AMOUNT_MISMATCH`, `SETTLEMENT_PAYEE_MISMATCH`, `DUPLICATE_SETTLEMENT`, `UNEXPECTED_TRANSFER`
+(pass `allow_other_transfers=True` for a known fee), `AUTHORIZATION_NOT_USED` or `INVALID_RECEIPT`. Only the
+payer's own USDC events are read, so a facilitator batch or an ERC-4337 bundle with other payers works too.
+
+Circle Gateway settles batched payments later and together, so there is no single receipt. Read both Gateway
+balances before submitting and again after, then:
+
+```python
+from sra_riskgate import verify_gateway_balances
+
+check = verify_gateway_balances(amount="0.01", payer_before="0.09", payer_after="0.08",
+                                payee_before="0.01", payee_after="0.02")
+```
+
+`GATEWAY_PAYEE_NOT_CREDITED` usually just means Gateway has not settled the batch yet. Both functions are
+offline: the SDK never calls an RPC or an API.
+
 ## Rule pre-filter
 
 ```python
@@ -521,6 +558,12 @@ Rejected, held, malformed or unknown payments are aborted with a reason starting
 USDC on Ethereum, Base, Base Sepolia, Arc and Arc Testnet is checked; other assets are aborted unless
 `allow_unsupported_assets=True`. Pass `peg_feed` to enable depeg checks and `on_decision` to log
 every decision. x402's own client spend controls stay active alongside these checks.
+
+From 0.18.0 the server's `maxTimeoutSeconds` is checked too: a request for a signature valid longer than
+`max_timeout_seconds` (default one hour) is aborted with `sra_riskgate_long_timeout` before the agent signs.
+Circle Gateway requirements, which ask for seven days by design, get `max_gateway_timeout_seconds` (default
+eight days) when `extra.verifyingContract` is Circle's GatewayWallet. `check_x402_timeout()` runs the same
+check on its own.
 
 Requires x402 2.25 or newer. Coinbase AgentKit 0.7.x currently depends on the older x402 1.x, so
 install the `[agentkit]` and `[x402]` extras in separate environments.

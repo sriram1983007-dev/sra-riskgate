@@ -254,7 +254,9 @@ def _check_authorization(
                          f"validAfter {valid_after} is in the future, so this is a post-dated payment.")
         lifetime = valid_before - max(t, valid_after)
         limit = max_gateway_validity_seconds if gateway else max_validity_seconds
-        if lifetime > limit:
+        # A signer whose clock runs slightly ahead of this one, signing for exactly the limit (one hour is a
+        # common choice in real x402 traffic), must not be held for the difference.
+        if lifetime > limit + _CLOCK_SKEW_SECONDS:
             return _hold(["LONG_LIVED_AUTHORIZATION"],
                          (f"it stays valid for {_duration(lifetime)}, more than the {_duration(limit)} limit "
                           f"for Circle Gateway payments; " if gateway else
@@ -272,3 +274,50 @@ def _check_authorization(
     except Exception as e:  # fail closed: no error path may approve
         return _verdict(ActionDecision.HOLD, ["CHECK_FAILED"],
                         f"The authorization check failed ({type(e).__name__}), so it is held.", ["manual_review"])
+
+
+def check_x402_timeout(
+    max_timeout_seconds: Any,
+    *,
+    chain_id: Optional[int],
+    extra: Optional[Mapping] = None,
+    max_validity_seconds: float = DEFAULT_MAX_VALIDITY_SECONDS,
+    max_gateway_validity_seconds: float = DEFAULT_MAX_GATEWAY_VALIDITY_SECONDS,
+) -> Optional[RiskAssessment]:
+    """Check an x402 server's ``maxTimeoutSeconds`` before the agent signs anything for it.
+
+    ``maxTimeoutSeconds`` is how long the server asks the payment signature to stay valid. A server that asks
+    for days is asking for a bearer instrument that outlives the call it pays for. Returns None if the request
+    is within the limit, otherwise a HOLD: ``LONG_TIMEOUT_REQUESTED``, or ``INVALID_REQUIREMENTS`` if the value
+    is not a non-negative whole number. Circle Gateway requirements (``extra.name`` ``GatewayWalletBatched``)
+    must stay valid for days by design, so they get the Gateway limit, but only when ``extra.verifyingContract``
+    is Circle's GatewayWallet on that chain; a Gateway-looking requirement for any other contract is held as
+    ``UNSUPPORTED_ASSET``. Real x402 traffic asks for 60, 300 or 3600 seconds; Gateway asks for 604,900.
+    """
+    try:
+        try:
+            if max_timeout_seconds is None or isinstance(max_timeout_seconds, (bool, float)):
+                raise ValueError
+            seconds = _int(max_timeout_seconds)
+        except (TypeError, ValueError):
+            return _hold(["INVALID_REQUIREMENTS"],
+                         f"the server's maxTimeoutSeconds {max_timeout_seconds!r} is not a whole number.")
+        if seconds < 0:
+            return _hold(["INVALID_REQUIREMENTS"], f"the server's maxTimeoutSeconds {seconds} is negative.")
+        extra = extra if isinstance(extra, Mapping) else {}
+        gateway = extra.get("name") == GATEWAY_BATCHED_DOMAIN
+        if gateway and not is_gateway_wallet(chain_id, extra.get("verifyingContract")):
+            return _hold(["UNSUPPORTED_ASSET"],
+                         f"the request names Circle Gateway's {GATEWAY_BATCHED_DOMAIN} domain but contract "
+                         f"{extra.get('verifyingContract')}, which is not Circle's GatewayWallet on chain {chain_id}.")
+        limit = max_gateway_validity_seconds if gateway else max_validity_seconds
+        if seconds > limit:
+            return _hold(["LONG_TIMEOUT_REQUESTED"],
+                         f"the server asks for a signature valid for {_duration(seconds)} (maxTimeoutSeconds "
+                         f"{seconds}), more than the {_duration(limit)} limit"
+                         + (" for Circle Gateway payments" if gateway else "") +
+                         "; anyone holding that signature could submit it until then.")
+        return None
+    except Exception as e:  # fail closed
+        return _verdict(ActionDecision.HOLD, ["CHECK_FAILED"],
+                        f"The maxTimeoutSeconds check failed ({type(e).__name__}), so it is held.", ["manual_review"])

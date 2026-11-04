@@ -3,12 +3,13 @@ from .models import TransactionPayload, RiskAssessment, ActionDecision
 from .payload_claims import PayloadClaim, scan_payload_claims
 from .check import check_payment
 from .transaction import check_delegation, check_transaction, decode_erc20_transfer
-from .authorization import check_authorization
+from .authorization import check_authorization, check_x402_timeout
 from .user_operation import check_user_operation, decode_account_calls
 from .account_code import check_account_code, delegate_from_code
 from .circle_wallets import CircleRequestBlocked, check_circle_request, guard_circle_wallets
 from .disputes import DisputeWindow, check_dispute_verdict, dispute_window
 from .sanctions import SanctionsList, is_sanctioned
+from .settlement import SettlementCheck, verify_gateway_balances, verify_settlement
 
 __all__ = [
     "RiskGate",
@@ -23,6 +24,7 @@ __all__ = [
     "decode_erc20_transfer",
     "check_delegation",
     "check_authorization",
+    "check_x402_timeout",
     "check_user_operation",
     "decode_account_calls",
     "check_account_code",
@@ -35,5 +37,8 @@ __all__ = [
     "DisputeWindow",
     "SanctionsList",
     "is_sanctioned",
+    "verify_settlement",
+    "verify_gateway_balances",
+    "SettlementCheck",
 ]
-__version__ = "0.17.0"
+__version__ = "0.18.0"

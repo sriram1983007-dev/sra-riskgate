@@ -192,7 +192,7 @@ def test_other_token_decimals_matter():
     assert usdg(rc).flags == ["SETTLEMENT_AMOUNT_MISMATCH"]
 
 
-@pytest.mark.parametrize("kw", [{"decimals": None}, {"token": None}, {"decimals": -1}, {"decimals": 37},
+@pytest.mark.parametrize("kw", [{"decimals": None, "token": "0x" + "12" * 20}, {"token": None}, {"decimals": -1}, {"decimals": 37},
                                 {"decimals": True}, {"decimals": 6.0}, {"token": "0x123"},
                                 {"amount": "0.0000001"}, {"chain_id": "4663"}])
 def test_other_token_bad_arguments(kw):
@@ -202,3 +202,52 @@ def test_other_token_bad_arguments(kw):
 def test_unknown_chain_without_token_says_how_to_check():
     r = verify(receipt(transfer(AGENT, PAYEE, 10_000)), chain_id=4663)
     assert r.flags == ["UNSUPPORTED_CHAIN"] and "token=" in r.explanation
+
+
+# 0.20.0: whole amounts print correctly (0.18.0-0.19.0 printed 10 as "1"; the verdict itself was always right)
+@pytest.mark.parametrize("micro,shown", [(10_000_000, "10"), (100_000_000, "100"), (1_000_000, "1"),
+                                         (10_500_000, "10.5"), (10_000, "0.01")])
+def test_round_amounts_are_shown_exactly(micro, shown):
+    r = verify(receipt(transfer(AGENT, PAYEE, micro)), amount=shown)
+    assert r.verified and r.transfers[0]["amount"] == shown and f"exactly {shown} USDC" in r.explanation
+
+
+def test_gateway_whole_balances_are_shown_exactly():
+    r = verify_gateway_balances(amount="10", payer_before="100", payer_after="90", payee_before="0", payee_after="10")
+    assert r.verified and "100 to 90" in r.explanation and "0 to 10" in r.explanation
+
+
+# 0.20.0: named stablecoins (contracts and decimals read on chain 2026-11-04)
+from sra_riskgate import STABLECOINS, stablecoin  # noqa: E402
+
+USDT_ETH = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+USDB_BASE = "0x100faa513ac917181eb29f73b64bf7a434a206fe"
+
+
+def test_registry_contents():
+    assert stablecoin("usdt", 1) == (USDT_ETH, 6)
+    assert stablecoin("USDB", 8453) == (USDB_BASE, 6)
+    assert stablecoin("USDB", 1)[1] == 6 and stablecoin("USDG", 4663)[1] == 6
+    assert set(STABLECOINS) == {"USDC", "USDT", "USDB", "USDG"}
+    with pytest.raises(ValueError, match="not listed on chain 8453"):
+        stablecoin("USDT", 8453)  # Tether does not issue USDT natively on Base
+    with pytest.raises(ValueError, match="unknown stablecoin"):
+        stablecoin("DAI", 1)
+
+
+def test_named_token_settlement():
+    rc = receipt(transfer(AGENT, PAYEE, 12_500_000, token=USDT_ETH))
+    r = verify(rc, chain_id=1, token="USDT", amount="12.5")
+    assert r.verified and "exactly 12.5 USDT" in r.explanation
+
+
+def test_named_token_by_address_fills_in_decimals():
+    rc = receipt(transfer(AGENT, PAYEE, 5_000_000, token=USDB_BASE))
+    r = verify(rc, chain_id=8453, token=USDB_BASE, amount="5")
+    assert r.verified and "USDB" in r.explanation
+
+
+def test_named_token_wrong_chain_or_decimals_is_refused():
+    rc = receipt(transfer(AGENT, PAYEE, 5_000_000, token=USDT_ETH))
+    assert verify(rc, chain_id=8453, token="USDT", amount="5").flags == ["CONFIGURATION_ERROR"]
+    assert verify(rc, chain_id=1, token="USDT", decimals=18, amount="5").flags == ["CONFIGURATION_ERROR"]

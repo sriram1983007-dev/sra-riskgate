@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.20.0 — 2026-11-04
+
+### Added
+- **Standing allowances: `check_allowances(owner, {spender: allowance}, ...)`.** A pull payment (a subscription
+  charge, a loan repayment taken by the lender's contract) needs no new signature, so there is nothing to gate at
+  the moment money moves; the risk is the allowance the agent granted earlier. Pass the raw values you read with
+  the token's `allowance(owner, spender)`, and get HOLD for an effectively unlimited allowance
+  (`UNLIMITED_ALLOWANCE`), one above `max_allowance` (`ALLOWANCE_ABOVE_LIMIT`) or one to a spender outside
+  `expected_spenders` (`UNKNOWN_SPENDER`), and REJECT for a sanctioned or blocked spender (`SANCTIONED_SPENDER`,
+  `BLOCKLISTED_SPENDER`). A zero allowance is never a finding. Works for any ERC-20 (`decimals`, `symbol`). Came out
+  of a public check of an agent's USDG loan repayment on Robinhood Chain, where the lender pulled the payment.
+
+- **Named stablecoins: USDT, USDB (Bridge), USDG and USDC.** `verify_settlement(..., token="USDT")` and
+  `check_allowances(..., token="USDB", chain_id=8453)` fill in the contract and decimals for the chain. Listed:
+  USDT on Ethereum; USDB (Bridge's stablecoin) on Ethereum and Base; USDG on Ethereum and Robinhood Chain; USDC on
+  every chain already supported. Each contract's `symbol()` and `decimals()` were read on chain before release;
+  addresses come from the issuers. USDT is not listed on Base, where Tether does not issue it natively. Passing a
+  listed contract address without `decimals` fills them in too; a wrong `decimals` for a named token is refused.
+  The table is `chains.STABLECOINS`; `stablecoin(symbol, chain_id)` looks one up. Pre-signing checks remain
+  USDC-only.
+
+### Fixed
+- Whole amounts in `verify_settlement` and `verify_gateway_balances` explanations and `amount` fields: 10 was shown
+  as "1" and 100 as "1" (trailing zeros were stripped before the decimal point). The verdicts were always right,
+  because they compare raw units; only the displayed amount was wrong. Affected 0.18.0 to 0.19.0.
+
 ## 0.19.0 — 2026-11-04
 
 ### Added

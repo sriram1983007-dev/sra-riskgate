@@ -21,7 +21,7 @@ from typing import Any, List, Mapping, Optional
 
 from pydantic import BaseModel, Field
 
-from sra_riskgate.chains import USDC_ADDRESSES, USDC_DECIMALS
+from sra_riskgate.chains import STABLECOINS, USDC_ADDRESSES, USDC_DECIMALS, stablecoin
 
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 AUTHORIZATION_USED_TOPIC = "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5"
@@ -73,6 +73,13 @@ def _topic_address(topic: Any) -> str:
     return "0x" + _hex(topic)[-40:]
 
 
+def _trim(s: str) -> str:
+    """Drop trailing zeros after the decimal point only: "100" stays "100", "0.0100" becomes "0.01"."""
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s or "0"
+
+
 def _micro(amount: Any) -> int:
     try:
         d = Decimal(str(amount)) * _MICRO
@@ -84,7 +91,7 @@ def _micro(amount: Any) -> int:
 
 
 def _usdc(micro: int) -> str:
-    return f"{Decimal(micro) / _MICRO:f}".rstrip("0").rstrip(".") or "0"
+    return _trim(f"{Decimal(micro) / _MICRO:f}")
 
 
 def _units(amount: Any, decimals: int, symbol: str) -> int:
@@ -98,7 +105,7 @@ def _units(amount: Any, decimals: int, symbol: str) -> int:
 
 
 def _fmt(units: int, decimals: int) -> str:
-    return f"{Decimal(units) / (Decimal(10) ** decimals):f}".rstrip("0").rstrip(".") or "0"
+    return _trim(f"{Decimal(units) / (Decimal(10) ** decimals):f}")
 
 
 def verify_settlement(
@@ -125,9 +132,10 @@ def verify_settlement(
             ``AuthorizationUsed`` event must be in the receipt too.
         allow_other_transfers: Accept other transfers of the token out of the payer in the same transaction, such
             as a facilitator fee taken alongside the payment. Off by default: anything else the payer sent is reported.
-        token, decimals: Check another ERC-20 instead of USDC, on any EVM chain: its contract address and its
-            ``decimals()`` (read them from the token contract yourself; both are required together). For example
-            USDG on Robinhood Chain (chain 4663). ``symbol`` only names the token in explanations.
+        token, decimals: Check another token instead of USDC. Either a named stablecoin listed for that chain
+            (``"USDT"``, ``"USDB"``, ``"USDG"``, ``"USDC"``: contract and decimals filled in, see
+            ``chains.STABLECOINS``), or any ERC-20 by contract address together with its ``decimals()``, which you
+            read from the token contract yourself. ``symbol`` only names the token in explanations.
 
     Flags when not verified: ``INVALID_RECEIPT``, ``UNSUPPORTED_CHAIN``, ``CONFIGURATION_ERROR``,
     ``SETTLEMENT_FAILED`` (the transaction reverted), ``SETTLEMENT_NOT_FOUND``, ``SETTLEMENT_AMOUNT_MISMATCH``,
@@ -136,6 +144,17 @@ def verify_settlement(
     try:
         try:
             payer_a, payee_a = _address(payer), _address(payee)
+            if isinstance(token, str) and not token.strip().lower().startswith("0x"):
+                named = token.strip().upper()
+                addr, dec_known = stablecoin(named, chain_id)
+                if decimals is not None and decimals != dec_known:
+                    raise ValueError(f"{named} on chain {chain_id} has {dec_known} decimals, not {decimals}")
+                token, decimals, symbol = addr, dec_known, symbol or named
+            elif token is not None and decimals is None:
+                listed = [(sym, d) for sym, by_chain in STABLECOINS.items() for cid, (a, d) in by_chain.items()
+                          if cid == chain_id and a.lower() == str(token).strip().lower()]
+                if listed:
+                    symbol, decimals = symbol or listed[0][0], listed[0][1]
             if (token is None) != (decimals is None):
                 raise ValueError("token and decimals must be given together")
             if token is not None:

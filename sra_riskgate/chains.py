@@ -23,6 +23,32 @@ NATIVE_USDC_DECIMALS = 18
 # Source: https://developers.circle.com/gateway/references/contract-addresses
 _GATEWAY_MAINNET = "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
 _GATEWAY_TESTNET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+# Named stablecoins for the post-settlement and allowance checks: symbol -> chain id -> (contract, decimals).
+# Each contract's symbol() and decimals() were read on chain on 2026-11-04; addresses come from the issuers:
+# Tether (USDT), Bridge reserves.bridge.xyz/usdb (USDB, the Bridge/Stripe stablecoin), Paxos docs (USDG).
+# USDT is deliberately absent on Base: Tether does not issue it natively there.
+STABLECOINS: dict[str, dict[int, tuple[str, int]]] = {
+    "USDC": {cid: (addr, USDC_DECIMALS) for cid, addr in USDC_ADDRESSES.items()},
+    "USDT": {1: ("0xdAC17F958D2ee523a2206206994597C13D831ec7", 6)},
+    "USDB": {1: ("0xeac4269c9a01190b1400c4dc728864e61895fdf3", 6),
+             8453: ("0x100faa513ac917181eb29f73b64bf7a434a206fe", 6)},
+    "USDG": {1: ("0xe343167631d89B6Ffc58B88d6b7fB0228795491D", 6),
+             4663: ("0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", 6)},
+}
+
+
+def stablecoin(symbol: object, chain_id: object) -> tuple[str, int]:
+    """(contract, decimals) for a named stablecoin on a chain; ValueError if this SDK does not list it there."""
+    sym = str(symbol).strip().upper()
+    if sym not in STABLECOINS:
+        raise ValueError(f"unknown stablecoin {symbol!r}; known: {', '.join(sorted(STABLECOINS))}")
+    if chain_id not in STABLECOINS[sym]:
+        chains = ", ".join(str(c) for c in sorted(STABLECOINS[sym]))
+        raise ValueError(f"{sym} is not listed on chain {chain_id} (listed on {chains}); pass its contract "
+                         f"address and decimals instead")
+    return STABLECOINS[sym][chain_id]
+
+
 GATEWAY_WALLET_ADDRESSES: dict[int, str] = {
     1: _GATEWAY_MAINNET, 8453: _GATEWAY_MAINNET, 5042: _GATEWAY_MAINNET,
     84532: _GATEWAY_TESTNET, 5042002: _GATEWAY_TESTNET,

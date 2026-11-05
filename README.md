@@ -429,6 +429,32 @@ and outcome accuracy rises from 77.8% to 78.7% (escalations count as misses). Re
 `python eval/dispute_window_check.py test.jsonl predictions.jsonl` on the files in
 [sra-bench-results](https://huggingface.co/datasets/sriram1983007/sra-bench-results).
 
+## Standing approvals: the risk in a pull payment (0.20.0+)
+
+When a lender, a subscription or any other contract pulls a payment with `transferFrom`, the agent signs nothing
+at that moment. The risk is the allowance it approved earlier. Read each one with the token's
+`allowance(owner, spender)` and check them on a schedule:
+
+```python
+from sra_riskgate import check_allowances
+
+result = check_allowances(
+    AGENT_WALLET,
+    {LENDER: 0, BILLING: 2**256 - 1},          # raw allowance(owner, spender) values
+    decimals=6, symbol="USDC",
+    max_allowance="50",                         # most any one spender may be allowed
+    expected_spenders=[LENDER],                 # the contracts the agent meant to approve
+)
+print(result.decision, result.flags)            # hold ['UNLIMITED_ALLOWANCE', 'UNKNOWN_SPENDER']
+```
+
+Named stablecoins fill in the contract and decimals: `check_allowances(owner, allowances, token="USDT",
+chain_id=1)`, and `verify_settlement(receipt, chain_id=8453, token="USDB", ...)`. Listed: USDT (Ethereum), USDB
+from Bridge (Ethereum, Base), USDG (Ethereum, Robinhood Chain) and USDC, each read on chain before release.
+
+A sanctioned or blocklisted spender is a `reject` with `revoke_allowance`; an unlimited, oversized or unexpected
+allowance is a `hold` with `reduce_allowance`; zero allowances are ignored.
+
 ## After settlement: check what actually arrived (0.18.0+)
 
 A payment the gate approved is not a receipt until the chain says so. `verify_settlement` reads the mined

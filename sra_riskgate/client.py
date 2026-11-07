@@ -245,7 +245,7 @@ class RulePreFilter:
                 and _is_whole(payload.amount)):
             # Informational only: it never changes the decision (see `notes` below).
             flags.append(ROUND_AMOUNT_FLAG)
-            round_note = (f"Round amount of {payload.amount:g} USDC (a whole number at or above "
+            round_note = (f"Round amount of {payload.amount:g} {payload.token} (a whole number at or above "
                           f"{self.round_amount_threshold:g}): large round-number transfers are a common "
                           "transaction-monitoring signal. Informational only; many such payments, such as "
                           "payroll or settlements, are legitimate.")

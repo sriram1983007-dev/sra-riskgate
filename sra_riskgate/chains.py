@@ -1,4 +1,4 @@
-"""USDC contract addresses and network identifiers shared by the integrations."""
+"""Stablecoin contract addresses and network identifiers shared by the checks and integrations."""
 from __future__ import annotations
 
 from typing import Optional
@@ -23,7 +23,8 @@ NATIVE_USDC_DECIMALS = 18
 # Source: https://developers.circle.com/gateway/references/contract-addresses
 _GATEWAY_MAINNET = "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
 _GATEWAY_TESTNET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
-# Named stablecoins for the post-settlement and allowance checks: symbol -> chain id -> (contract, decimals).
+# Named stablecoins: symbol -> chain id -> (contract, decimals). From 1.0.0 the checks before signing cover them
+# too, but only the symbols you enable with ``allowed_tokens`` (USDC alone by default).
 # Each contract's symbol() and decimals() were read on chain on 2026-11-04; addresses come from the issuers:
 # Tether (USDT), Bridge reserves.bridge.xyz/usdb (USDB, the Bridge/Stripe stablecoin), Paxos docs (USDG).
 # USDT is deliberately absent on Base: Tether does not issue it natively there.
@@ -47,6 +48,59 @@ def stablecoin(symbol: object, chain_id: object) -> tuple[str, int]:
         raise ValueError(f"{sym} is not listed on chain {chain_id} (listed on {chains}); pass its contract "
                          f"address and decimals instead")
     return STABLECOINS[sym][chain_id]
+
+
+DEFAULT_ALLOWED_TOKENS: tuple[str, ...] = ("USDC",)
+
+# Every chain where at least one listed stablecoin is checked.
+STABLECOIN_CHAINS: frozenset[int] = frozenset(c for chains in STABLECOINS.values() for c in chains)
+
+# Stablecoins that implement EIP-3009 transferWithAuthorization, the signature x402's ``exact`` scheme uses.
+# A TransferWithAuthorization for any other token could never settle, so it is held. Read on chain on
+# 2026-11-06 (contract code, authorizationState() and the EIP-712 domain separator): USDC on Ethereum and Base
+# implements it (domain "USD Coin", version "2"); USDT implements neither EIP-3009 nor EIP-2612 permit; USDB
+# (domain "USDBridge", "1") and USDG (domain "Global Dollar", "1") implement permit but not EIP-3009.
+EIP3009_TOKENS: frozenset[tuple[str, int]] = frozenset({("USDC", c) for c in USDC_ADDRESSES})
+
+
+def stablecoin_at(chain_id: object, contract: object) -> Optional[tuple[str, int]]:
+    """(symbol, decimals) of the listed stablecoin at ``contract`` on ``chain_id``, or None."""
+    if not isinstance(contract, str) or isinstance(chain_id, bool):
+        return None
+    c = contract.strip().lower()
+    for sym, chains in STABLECOINS.items():
+        listed = chains.get(chain_id)  # type: ignore[call-overload]
+        if listed and listed[0].lower() == c:
+            return sym, listed[1]
+    return None
+
+
+def listed_on(chain_id: object) -> str:
+    """'USDC 0x…, USDT 0x…' for the stablecoins listed on a chain, for error messages."""
+    out = [f"{sym} {chains[chain_id][0]}" for sym, chains in STABLECOINS.items()
+           if not isinstance(chain_id, bool) and chain_id in chains]  # type: ignore[operator]
+    return ", ".join(out) or "none"
+
+
+def parse_allowed_tokens(allowed: object) -> frozenset[str]:
+    """Validate ``allowed_tokens``: None means USDC only; otherwise listed symbols, case-insensitive."""
+    if allowed is None:
+        return frozenset(DEFAULT_ALLOWED_TOKENS)
+    if isinstance(allowed, str):
+        allowed = [p for p in allowed.replace(",", " ").split() if p]
+    try:
+        items = list(allowed)  # type: ignore[call-overload]
+    except TypeError:
+        raise ValueError("allowed_tokens must be a list of stablecoin symbols")
+    out = set()
+    for t in items:
+        sym = str(t).strip().upper() if isinstance(t, str) else None
+        if sym not in STABLECOINS:
+            raise ValueError(f"allowed_tokens: unknown stablecoin {t!r}; known: {', '.join(sorted(STABLECOINS))}")
+        out.add(sym)
+    if not out:
+        raise ValueError("allowed_tokens is empty, so no payment could ever be approved")
+    return frozenset(out)
 
 
 GATEWAY_WALLET_ADDRESSES: dict[int, str] = {

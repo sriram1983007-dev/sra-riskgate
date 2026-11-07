@@ -8,13 +8,14 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb)
 [![Paper DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23715017.svg)](https://doi.org/10.5281/zenodo.23715017)
 
-Risk checks for stablecoin and AI-agent payments.
+Risk checks for stablecoin and AI-agent payments: USDC, USDT, USDB (Bridge) and USDG, checked before the agent
+signs and verified after settlement.
 
 This repository contains:
 
 - **`sra-riskgate`**, a small Python SDK with deterministic pre-filter rules (an offline OFAC SDN address
   match, your own blocklist and new-payee hold, address validation, self-transfer blocking, amount ceilings,
-  USDC depeg checks in both directions), plus integrations for
+  depeg checks in both directions), plus integrations for
   [x402](https://github.com/x402-foundation/x402) payment flows and [Coinbase AgentKit](https://github.com/coinbase/agentkit).
 - **`eval/`**, the scripts used to benchmark the
   [SRA-RiskGate-4B](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) model on
@@ -89,15 +90,49 @@ Only pay on `approve`.
 |---|---|---|
 | Sender or recipient is on the OFAC SDN list (bundled snapshot) | reject | `OFAC_SDN_MATCH` |
 | Sender or recipient is in your `blocked_addresses` | reject | `BLOCKLISTED_ADDRESS` |
-| Token is not USDC, or chain is not Ethereum, Base, Base Sepolia, Arc or Arc Testnet | hold | `UNSUPPORTED_ASSET` / `UNSUPPORTED_CHAIN` |
-| Malformed, zero or self address; amount ≤ 0, NaN, infinite or below 0.000001 USDC | reject | `INVALID_PAYMENT` |
+| Token is not in `allowed_tokens` (default USDC only), or not listed on that chain | hold | `UNSUPPORTED_ASSET` / `UNSUPPORTED_CHAIN` |
+| Malformed, zero or self address; amount ≤ 0, NaN, infinite or below 0.000001 | reject | `INVALID_PAYMENT` |
 | Invalid thresholds, or a malformed address list | reject | `CONFIGURATION_ERROR` |
 | Rules (see below) | approve / hold / reject | rule flags |
 | `known_recipients` given and the recipient is not on it | hold | `NEW_COUNTERPARTY` |
 | Request text claims its own verification | hold | `self_asserted_verification_in_payload` |
-| Whole-number amount of 10,000 USDC or more | unchanged (informational) | `ROUND_AMOUNT` |
+| Whole-number amount of 10,000 or more | unchanged (informational) | `ROUND_AMOUNT` |
 | Sanctions list more than 90 days old | unchanged (informational) | `SANCTIONS_LIST_STALE` |
 | Any other error | hold | `CHECK_FAILED` |
+
+## USDT, USDB and USDG (1.0.0+)
+
+Every check before signing (`check_payment`, `check_transaction`, `check_authorization`,
+`check_user_operation` and Circle Wallets transfers) covers these stablecoins as well as USDC. They are **off by
+default**, so upgrading never starts approving a token you did not choose; turn them on with `allowed_tokens`:
+
+```python
+check_payment(chain_id=1, sender=MY_WALLET, recipient=PAYEE, amount=250, token="USDT",
+              allowed_tokens=["USDC", "USDT"], peg_deviation_pct=usdt_peg_deviation, max_amount=1_000)
+
+check_transaction(tx, allowed_tokens=["USDC", "USDG"], known_recipients=MY_PAYEES)   # token read from tx["to"]
+```
+
+| Token | Chains | Transfer / transaction | x402 signature (EIP-3009) | Permit |
+|---|---|---|---|---|
+| USDC | Ethereum, Base, Base Sepolia, Arc, Arc Testnet | checked | checked | held |
+| USDT | Ethereum | checked | not implemented by the token: held | not implemented by the token |
+| USDB (Bridge) | Ethereum, Base | checked | not implemented by the token: held | held |
+| USDG | Ethereum, Robinhood Chain (4663) | checked | not implemented by the token: held | held |
+
+Which token is being paid comes from the contract address, never from the request's own label. Approvals and
+permits are held for every listed token, enabled or not. `max_amount` and the depeg thresholds apply to the token
+being paid, so pass that token's own peg deviation, not USDC's. In a smart-account batch, payments to one payee are
+summed across tokens, so splitting a payment between USDC and USDT does not get it under the limit. Each contract,
+its decimals, and whether it implements EIP-3009 and permit were read on chain before release. The x402 hooks
+and Circle Gateway remain USDC-only: x402's EVM `exact` scheme signs EIP-3009, which only USDC implements
+here, and Gateway is a USDC product.
+
+### API stability
+
+From 1.0.0 the public API follows semantic versioning: the functions, arguments, decisions and flag names in this
+README change incompatibly only in a new major version. New flags may be added in minor versions, so treat any
+flag you do not recognise as a reason not to pay, and pay only on `approve`.
 
 **Using a coding agent?** The [agent-payment-guard](https://github.com/sriram1983007-dev/agent-payment-guard)
 Agent Skill teaches Claude Code and other agents to run this check before paying and to add it to agent code:

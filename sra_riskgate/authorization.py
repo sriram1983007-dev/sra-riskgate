@@ -18,8 +18,8 @@ import time
 from decimal import Decimal
 from typing import Any, Mapping, Optional
 
-from sra_riskgate.chains import (GATEWAY_BATCHED_DOMAIN, GATEWAY_WALLET_ADDRESSES, USDC_ADDRESSES, USDC_DECIMALS,
-                                 is_gateway_wallet, is_usdc)
+from sra_riskgate.chains import (EIP3009_TOKENS, GATEWAY_BATCHED_DOMAIN, GATEWAY_WALLET_ADDRESSES,
+                                 STABLECOIN_CHAINS, USDC_DECIMALS, is_gateway_wallet, listed_on, stablecoin_at)
 from sra_riskgate.check import _verdict, check_payment
 from sra_riskgate.account_code import account_hold, outranks
 from sra_riskgate.models import ActionDecision, RiskAssessment
@@ -106,14 +106,18 @@ def check_authorization(
     ``sender`` and ``chain_id``, when given, must match the message's ``from`` and the domain's ``chainId``.
     ``now`` (Unix seconds) defaults to the current time.
 
-    A ``TransferWithAuthorization`` (or ``ReceiveWithAuthorization``) for USDC is decoded and passed to
-    ``check_payment`` with every keyword in ``policy`` (``known_recipients``, ``blocked_addresses``,
+    A ``TransferWithAuthorization`` (or ``ReceiveWithAuthorization``) for USDC, or another listed stablecoin
+    that implements EIP-3009 and is enabled with ``allowed_tokens``, is decoded and passed to ``check_payment``
+    with every keyword in ``policy`` (``allowed_tokens``, ``known_recipients``, ``blocked_addresses``,
     ``max_amount``, ``untrusted_request``, ``peg_deviation_pct``, ...). Before that, it is HOLD with:
 
     * ``TOKEN_APPROVAL`` for an EIP-2612 ``Permit`` (plus ``UNLIMITED_APPROVAL`` for an effectively
-      unlimited value): a signed permit lets another address spend the wallet's USDC later.
-    * ``UNSUPPORTED_SIGNATURE`` for any other primary type.
-    * ``UNSUPPORTED_CHAIN`` or ``UNSUPPORTED_ASSET`` when the domain is not USDC on a supported chain.
+      unlimited value): a signed permit lets another address spend the wallet's tokens later. Held for every
+      listed stablecoin.
+    * ``UNSUPPORTED_SIGNATURE`` for any other primary type, or a TransferWithAuthorization for a listed token
+      that does not implement EIP-3009 (USDT, for example), which could never settle.
+    * ``UNSUPPORTED_CHAIN`` or ``UNSUPPORTED_ASSET`` when the domain is not a listed stablecoin on a supported
+      chain.
     * ``AUTHORIZATION_MISMATCH`` when ``from`` or ``chainId`` disagree with the arguments.
     * ``AUTHORIZATION_EXPIRED`` when ``validBefore`` has passed, ``AUTHORIZATION_NOT_YET_VALID`` when
       ``validAfter`` is in the future, and ``LONG_LIVED_AUTHORIZATION`` when it stays valid for more than
@@ -187,7 +191,7 @@ def _check_authorization(
             return _hold(["INVALID_AUTHORIZATION"], f"domain chainId {raw_chain!r} is not a number.")
         if chain_id is not None and chain_id != dom_chain:
             return _hold(["AUTHORIZATION_MISMATCH"], f"it is for chain {dom_chain}, not {chain_id}.")
-        if dom_chain not in USDC_ADDRESSES:
+        if dom_chain not in STABLECOIN_CHAINS:
             return _hold(["UNSUPPORTED_CHAIN"], f"chain {dom_chain} is not checked.")
         contract = domain.get("verifyingContract")
         gateway = domain.get("name") == GATEWAY_BATCHED_DOMAIN
@@ -196,7 +200,7 @@ def _check_authorization(
                 return _hold(["UNSUPPORTED_ASSET"],
                              f"it names Circle Gateway's {GATEWAY_BATCHED_DOMAIN} domain but is for contract "
                              f"{contract}, not Circle's GatewayWallet on chain {dom_chain} "
-                             f"({GATEWAY_WALLET_ADDRESSES[dom_chain]}).")
+                             f"({GATEWAY_WALLET_ADDRESSES.get(dom_chain, 'Gateway is not on this chain')}).")
             if str(domain.get("version")) != "1" or domain.get("salt") is not None:
                 return _hold(["UNSUPPORTED_ASSET"],
                              f"only USDC Gateway payments (domain version \"1\", no salt) are checked; this is "
@@ -204,14 +208,19 @@ def _check_authorization(
             if primary != "TransferWithAuthorization":
                 return _hold(["UNSUPPORTED_SIGNATURE"],
                              f"only TransferWithAuthorization is checked on the Gateway domain; this is {primary}.")
-        elif not is_usdc(dom_chain, contract):
-            return _hold(["UNSUPPORTED_ASSET"],
-                         f"it is for contract {contract}, which is not the USDC contract on chain {dom_chain} "
-                         f"({USDC_ADDRESSES[dom_chain]}).")
+        if gateway:
+            sym, decimals = "USDC", USDC_DECIMALS
+        else:
+            listed = stablecoin_at(dom_chain, contract)
+            if listed is None:
+                return _hold(["UNSUPPORTED_ASSET"],
+                             f"it is for contract {contract}, which is not a listed stablecoin contract on chain "
+                             f"{dom_chain} ({listed_on(dom_chain)}).")
+            sym, decimals = listed
 
         if primary == "Permit":
             flags = ["TOKEN_APPROVAL"]
-            why = "it is an EIP-2612 permit, which lets another address spend this wallet's USDC later."
+            why = f"it is an EIP-2612 permit, which lets another address spend this wallet's {sym} later."
             try:
                 if _int(message.get("value")) >= _UNLIMITED:
                     flags.append("UNLIMITED_APPROVAL")
@@ -223,10 +232,15 @@ def _check_authorization(
             return _hold(flags, why)
         if primary not in _AUTH_TYPES:
             return _hold(["UNSUPPORTED_SIGNATURE"],
-                         f"only USDC TransferWithAuthorization is checked; this is {primary}.")
+                         f"only {sym} TransferWithAuthorization is checked; this is {primary}.")
+        if not gateway and (sym, dom_chain) not in EIP3009_TOKENS:
+            return _hold(["UNSUPPORTED_SIGNATURE"],
+                         f"{sym} on chain {dom_chain} does not implement EIP-3009 {primary}, so this signature "
+                         f"could never settle as a payment; whoever asked for it is not paying through {sym}'s "
+                         f"own contract.")
         if types is not None and _fields(types, primary) != _AUTH_FIELDS:
             return _hold(["INVALID_AUTHORIZATION"],
-                         f"the {primary} type definition is not the USDC (EIP-3009) one.")
+                         f"the {primary} type definition is not the EIP-3009 one.")
 
         frm, to, nonce = message.get("from"), message.get("to"), message.get("nonce")
         if not _is_address(frm) or not _is_address(to):
@@ -269,8 +283,8 @@ def _check_authorization(
                          f"days, and this one expires in {_duration(valid_before - t)}, so Gateway "
                          f"would reject it.")
 
-        amount = float(Decimal(value) / (Decimal(10) ** USDC_DECIMALS))
-        return check_payment(chain_id=dom_chain, sender=frm, recipient=to, amount=amount, **policy)
+        amount = float(Decimal(value) / (Decimal(10) ** decimals))
+        return check_payment(chain_id=dom_chain, sender=frm, recipient=to, amount=amount, token=sym, **policy)
     except Exception as e:  # fail closed: no error path may approve
         return _verdict(ActionDecision.HOLD, ["CHECK_FAILED"],
                         f"The authorization check failed ({type(e).__name__}), so it is held.", ["manual_review"])

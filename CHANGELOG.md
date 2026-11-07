@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.0 — 2026-11-06
+
+### Added
+- **USDT, USDB (Bridge) and USDG in every check before signing.** `check_payment`, `check_transaction`,
+  `check_authorization`, `check_user_operation` and Circle Wallets transfers (`check_circle_request`) now check
+  these stablecoins as well as USDC: USDT on Ethereum, USDB on Ethereum and Base, USDG on Ethereum and Robinhood
+  Chain (4663). They are off by default; enable them with `allowed_tokens=["USDC", "USDT", "USDB", "USDG"]`
+  (any subset). A token not enabled is held as `UNSUPPORTED_ASSET`, naming `allowed_tokens`.
+  - `check_transaction` identifies the token by the contract it calls, and reads its decimals from the table.
+    Approvals and permits are held for every listed token, enabled or not.
+  - `check_authorization`: only USDC implements EIP-3009, so a `TransferWithAuthorization` for USDT, USDB or USDG
+    is held as `UNSUPPORTED_SIGNATURE` (it could never settle). Permits for USDB and USDG are held as
+    `TOKEN_APPROVAL`. Read on chain on 2026-11-06: USDB (domain "USDBridge", "1") and USDG ("Global Dollar",
+    "1") implement EIP-2612 permit but not EIP-3009; USDT implements neither.
+  - `check_user_operation` sums payments to one payee across tokens, so splitting a payment between USDC and
+    USDT does not bring it under `max_amount`.
+- `stablecoin_at(chain_id, contract)` returns the listed token at an address.
+- An API stability promise: from 1.0.0 the public API follows semantic versioning (see the README).
+
+### Changed
+- `check_payment` takes `allowed_tokens`; without it the behaviour is exactly 0.20.0's (USDC only). Explanations
+  name the token paid (for example the `ROUND_AMOUNT` note and the smallest-unit check).
+- `check_transaction`, `check_authorization` and `check_user_operation` accept Robinhood Chain (4663), where USDG
+  is listed; anything else there is held as before.
+- Development status: Production/Stable.
+
+### Unchanged
+- The x402 hooks and Circle Gateway checks remain USDC-only: x402's EVM `exact` scheme signs EIP-3009, which only
+  USDC implements among the listed tokens, and Gateway is a USDC product.
+
 ## 0.20.0 — 2026-11-04
 
 ### Added

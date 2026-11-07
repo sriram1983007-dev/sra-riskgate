@@ -2,7 +2,7 @@
 
 ``check_payment`` checks a payment described in fields (chain, sender, recipient, amount). An agent
 actually signs a transaction: a contract address, calldata and a native value. ``check_transaction``
-decodes that transaction and only lets a plain USDC ``transfer`` through to the full payment check.
+decodes that transaction and only lets a plain stablecoin ``transfer`` through to the full payment check.
 Everything else (token approvals, ``transferFrom``, other contracts, native ETH) is held. Fails closed.
 """
 from __future__ import annotations
@@ -11,8 +11,8 @@ import inspect
 from decimal import Decimal
 from typing import Any, Mapping, Optional
 
-from sra_riskgate.chains import (NATIVE_USDC_CHAINS, NATIVE_USDC_DECIMALS, USDC_ADDRESSES, USDC_DECIMALS,
-                                  is_usdc)
+from sra_riskgate.chains import (NATIVE_USDC_CHAINS, NATIVE_USDC_DECIMALS, STABLECOIN_CHAINS, USDC_DECIMALS,
+                                  is_usdc, listed_on, stablecoin_at)
 from sra_riskgate.check import _verdict, check_payment
 from sra_riskgate.account_code import account_hold, outranks
 from sra_riskgate.models import ActionDecision, RiskAssessment
@@ -140,16 +140,20 @@ def check_transaction(
     (or ``input``), optional ``value``, ``from`` and ``chainId``. ``chain_id`` and ``sender``
     default to ``tx["chainId"]`` and ``tx["from"]``; if both are given they must agree.
 
-    Only a USDC ``transfer`` with no native value is decoded and passed to ``check_payment``, with
-    every keyword in ``policy`` (``known_recipients``, ``blocked_addresses``, ``max_amount``,
-    ``untrusted_request``, ``peg_deviation_pct``, ...). Everything else is HOLD:
+    Only a ``transfer`` of a listed stablecoin with no native value is decoded and passed to ``check_payment``
+    (as that token), with every keyword in ``policy`` (``allowed_tokens``, ``known_recipients``,
+    ``blocked_addresses``, ``max_amount``, ``untrusted_request``, ``peg_deviation_pct``, ...). The token is
+    read from ``to``: USDC by default, and USDT, USDB or USDG once enabled with ``allowed_tokens``.
+    Everything else is HOLD:
 
     * ``TOKEN_APPROVAL`` for ``approve``, ``increaseAllowance`` and ``permit`` (plus
       ``UNLIMITED_APPROVAL`` for an effectively unlimited amount): an allowance lets someone else
-      move the wallet's USDC later, the usual way agent wallets are drained.
-    * ``UNSUPPORTED_FUNCTION`` for any other USDC function (``transferFrom``,
+      move the wallet's tokens later, the usual way agent wallets are drained. Held for every listed
+      stablecoin, enabled or not.
+    * ``UNSUPPORTED_FUNCTION`` for any other token function (``transferFrom``,
       ``transferWithAuthorization``, ...).
-    * ``UNSUPPORTED_ASSET`` when ``to`` is not the USDC contract on that chain.
+    * ``UNSUPPORTED_ASSET`` when ``to`` is not a listed stablecoin on that chain, or is one that is not in
+      ``allowed_tokens``.
     * ``NATIVE_VALUE_TRANSFER`` when the transaction moves native ETH.
     * ``CODE_DELEGATION`` for an EIP-7702 (type 4) transaction, or any transaction carrying an
       ``authorizationList``: it delegates the whole account to contract code. Checked first, so a clean
@@ -222,7 +226,7 @@ def _check_transaction(
         sender = sender if sender is not None else tx_from
         if chain_id is None or sender is None:
             return _hold(["INVALID_TRANSACTION"], "the chain id and the sender are both required.")
-        if isinstance(chain_id, bool) or chain_id not in USDC_ADDRESSES:
+        if isinstance(chain_id, bool) or chain_id not in STABLECOIN_CHAINS:
             return _hold(["UNSUPPORTED_CHAIN"], f"chain {chain_id!r} is not checked.")
 
         try:
@@ -257,10 +261,12 @@ def _check_transaction(
 
         if not to:
             return _hold(["INVALID_TRANSACTION"], "it has no 'to' address (a contract deployment?).")
-        if not is_usdc(chain_id, to):
+        listed = stablecoin_at(chain_id, to)
+        if listed is None:
             return _hold(["UNSUPPORTED_ASSET"],
-                         f"it calls {to}, which is not the USDC contract on chain {chain_id} "
-                         f"({USDC_ADDRESSES[chain_id]}).")
+                         f"it calls {to}, which is not a listed stablecoin contract on chain {chain_id} "
+                         f"({listed_on(chain_id)}).")
+        sym, decimals = listed
 
         h = _hex(raw if raw is not None else "")
         if h is None or len(h) < 8:
@@ -268,7 +274,7 @@ def _check_transaction(
         selector = h[:8]
         if selector in _APPROVALS:
             flags = ["TOKEN_APPROVAL"]
-            why = f"it is {_APPROVALS[selector]}, which lets another address spend this wallet's USDC later."
+            why = f"it is {_APPROVALS[selector]}, which lets another address spend this wallet's {sym} later."
             if selector != "d505accf" and len(h) == 8 + 128:
                 spender, amount = _address_word(h[8:72]), int(h[72:136], 16)
                 if amount >= _UNLIMITED:
@@ -279,14 +285,15 @@ def _check_transaction(
             return _hold(flags, why)
         if selector != TRANSFER:
             name = _OTHER.get(selector, f"function 0x{selector}")
-            return _hold(["UNSUPPORTED_FUNCTION"], f"only USDC transfer() is checked; this is {name}.")
+            return _hold(["UNSUPPORTED_FUNCTION"], f"only {sym} transfer() is checked; this is {name}.")
 
         decoded = decode_erc20_transfer(h)
         if decoded is None:
             return _hold(["INVALID_TRANSACTION"], "the transfer calldata is malformed or the wrong length.")
         recipient, atomic = decoded
-        amount = float(Decimal(atomic) / (Decimal(10) ** USDC_DECIMALS))
-        return check_payment(chain_id=chain_id, sender=sender, recipient=recipient, amount=amount, **policy)
+        amount = float(Decimal(atomic) / (Decimal(10) ** decimals))
+        return check_payment(chain_id=chain_id, sender=sender, recipient=recipient, amount=amount, token=sym,
+                             **policy)
     except Exception as e:  # fail closed: no error path may approve
         return _verdict(ActionDecision.HOLD, ["CHECK_FAILED"],
                         f"The transaction check failed ({type(e).__name__}), so it is held.", ["manual_review"])

@@ -61,16 +61,20 @@ class TransactionPayload(BaseModel):
 
     @model_validator(mode="after")
     def check_representable_amount(self):
-        """A USDC amount below one atomic unit (0.000001) rounds to zero on-chain and can never execute."""
-        if isinstance(self.token, str) and self.token.strip().upper() == "USDC":
+        """An amount below one atomic unit (0.000001 for every listed stablecoin) rounds to zero on-chain."""
+        from sra_riskgate.chains import STABLECOINS
+        sym = self.token.strip().upper() if isinstance(self.token, str) else None
+        if sym in STABLECOINS:
+            decimals = next(iter(STABLECOINS[sym].values()))[1]
             try:
-                atomic = (Decimal(str(self.amount)) * (Decimal(10) ** USDC_DECIMALS)).to_integral_value(
+                atomic = (Decimal(str(self.amount)) * (Decimal(10) ** decimals)).to_integral_value(
                     rounding=ROUND_DOWN)
             except InvalidOperation:
                 raise ValueError("Amount is not a valid number.")
             if atomic < 1:
+                smallest = format(Decimal(1).scaleb(-decimals), "f")
                 raise ValueError(
-                    f"Amount {self.amount} is below the smallest USDC unit (0.000001) and rounds to zero on-chain.")
+                    f"Amount {self.amount} is below the smallest {sym} unit ({smallest}) and rounds to zero on-chain.")
         return self
 
     @model_validator(mode="after")

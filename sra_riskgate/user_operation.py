@@ -26,7 +26,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Iterable, Mapping, Optional
 
-from sra_riskgate.chains import NATIVE_USDC_CHAINS, NATIVE_USDC_DECIMALS, USDC_ADDRESSES, USDC_DECIMALS
+from sra_riskgate.chains import NATIVE_USDC_CHAINS, NATIVE_USDC_DECIMALS, STABLECOIN_CHAINS, stablecoin_at
 from sra_riskgate.check import _verdict, check_payment
 from sra_riskgate.counterparty import _normalise, parse_address_list
 from sra_riskgate.models import ActionDecision, RiskAssessment
@@ -200,15 +200,16 @@ def _paymaster(op: Mapping) -> Optional[str]:
     return None
 
 
-def _usdc_micro(chain_id: int, call: dict) -> Optional[tuple]:
-    """(recipient, micro-USDC) if the call is a USDC payment, else None."""
+def _stablecoin_paid(chain_id: int, call: dict) -> Optional[tuple]:
+    """(recipient, symbol, amount as Decimal) if the call is a stablecoin payment, else None."""
     data = _hex(call["data"]) or ""
-    if _same(call["to"], USDC_ADDRESSES.get(chain_id)) and data[:8] == "a9059cbb" and not call["value"]:
+    listed = stablecoin_at(chain_id, call["to"])
+    if listed and data[:8] == "a9059cbb" and not call["value"]:
         decoded = decode_erc20_transfer(data)
-        return (decoded[0].lower(), decoded[1]) if decoded else None
+        return (decoded[0].lower(), listed[0], Decimal(decoded[1]).scaleb(-listed[1])) if decoded else None
     if chain_id in NATIVE_USDC_CHAINS and not data and call["value"] > 0:
-        scale = 10 ** (NATIVE_USDC_DECIMALS - USDC_DECIMALS)
-        return (call["to"].lower(), -(-call["value"] // scale))
+        scale = 10 ** (NATIVE_USDC_DECIMALS - 6)
+        return (call["to"].lower(), "USDC", Decimal(-(-call["value"] // scale)).scaleb(-6))
     return None
 
 
@@ -228,11 +229,11 @@ def check_user_operation(
     ``user_op["sender"]`` (the smart account). Every keyword in ``policy`` (``known_recipients``, ``max_amount``,
     ``untrusted_request``, ``account_code``, ...) applies to each call.
 
-    * Each call the account would make goes through ``check_transaction``: a USDC ``transfer`` gets the full
-      payment check; approvals, permits, other contracts and native ETH are held. The first call that is not
+    * Each call the account would make goes through ``check_transaction``: a stablecoin ``transfer`` (USDC, or
+      any token enabled with ``allowed_tokens``) gets the full payment check; approvals, permits, other contracts and native ETH are held. The first call that is not
       approved decides, and its index is named.
-    * Payments to the same payee are summed across the batch and checked again as one payment, so splitting a
-      payment does not bring it under ``max_amount``.
+    * Payments to the same payee are summed across the batch, and across stablecoins, and checked again as one
+      payment, so splitting a payment does not bring it under ``max_amount``.
     * A call from the account to itself is held (``ACCOUNT_SELF_CALL``): it can change the account's owners,
       modules or implementation.
     * A delegatecall is held (``DELEGATECALL``), except a Safe batch through MultiSendCallOnly, which is decoded.
@@ -262,7 +263,7 @@ def check_user_operation(
             chain_id = _int(chain_id)
         except (TypeError, ValueError):
             return _hold(["INVALID_USER_OPERATION"], f"chain id {chain_id!r} is not a number.")
-        if chain_id not in USDC_ADDRESSES:
+        if chain_id not in STABLECOIN_CHAINS:
             return _hold(["UNSUPPORTED_CHAIN"], f"chain {chain_id} is not checked.")
         account = _normalise(user_op.get("sender"))
         if account is None:
@@ -290,7 +291,7 @@ def check_user_operation(
         if not calls:
             return _hold(["UNSUPPORTED_ACCOUNT_CALL"], "it makes no calls.")
 
-        n, approved, totals, counts = len(calls), [], {}, {}
+        n, approved, totals, counts, tokens = len(calls), [], {}, {}, {}
         for i, call in enumerate(calls, 1):
             where = f"call {i} of {n}" if n > 1 else "its call"
             if _same(call["to"], account):
@@ -303,21 +304,28 @@ def check_user_operation(
                                       explanation=f"In this UserOperation, {where}: {why}"[:500],
                                       required_actions=r.required_actions)
             approved.append(r)
-            paid = _usdc_micro(chain_id, call)
+            paid = _stablecoin_paid(chain_id, call)
             if paid:
-                totals[paid[0]] = totals.get(paid[0], 0) + paid[1]
-                counts[paid[0]] = counts.get(paid[0], 0) + 1
+                payee, sym, amt = paid
+                totals[payee] = totals.get(payee, Decimal(0)) + amt
+                counts[payee] = counts.get(payee, 0) + 1
+                tokens.setdefault(payee, []).append(sym)
 
-        for payee, micro in totals.items():
+        # Every listed stablecoin is a US-dollar token, so payments to one payee are summed across tokens:
+        # splitting a payment between USDC and USDT does not bring it under max_amount either.
+        for payee, total in totals.items():
             if counts[payee] < 2:
                 continue
-            amount = float(Decimal(micro) / (Decimal(10) ** USDC_DECIMALS))
-            r = check_payment(chain_id=chain_id, sender=account, recipient=payee, amount=amount, **policy)
+            amount = float(total)
+            syms = list(dict.fromkeys(tokens[payee]))
+            unit = syms[0] if len(syms) == 1 else "in " + " and ".join(syms)
+            r = check_payment(chain_id=chain_id, sender=account, recipient=payee, amount=amount, token=syms[0],
+                              **policy)
             if r.decision != ActionDecision.APPROVE:
                 return RiskAssessment(
                     decision=r.decision, risk_score=r.risk_score, flags=sorted(set(r.flags) | {"BATCH_TOTAL"}),
                     explanation=(f"Together, the {counts[payee]} payments to {payee} in this UserOperation total "
-                                 f"{amount} USDC: {r.explanation}")[:500],
+                                 f"{format(total.normalize(), 'f')} {unit}: {r.explanation}")[:500],
                     required_actions=r.required_actions)
 
         flags = sorted({f for r in approved for f in r.flags})

@@ -37,7 +37,7 @@ from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any, Callable, Mapping, Optional, Union
 
 from sra_riskgate.authorization import check_authorization
-from sra_riskgate.chains import NATIVE_USDC_CHAINS, USDC_ADDRESSES, USDC_DECIMALS, is_usdc
+from sra_riskgate.chains import NATIVE_USDC_CHAINS, USDC_ADDRESSES, USDC_DECIMALS, listed_on, stablecoin_at
 from sra_riskgate.check import _verdict, check_payment
 from sra_riskgate.models import ActionDecision, RiskAssessment
 from sra_riskgate.transaction import _POLICY_KEYS, _same, check_transaction
@@ -357,11 +357,15 @@ def check_circle_request(
                 return _hold(["UNSUPPORTED_ASSET"],
                              f"Circle token {token_id} is not one of the USDC token ids you configured "
                              f"(usdc_token_ids).")
-        elif token_address:
-            if not is_usdc(chain_id, token_address):
+        sym = "USDC"
+        if token_address:
+            listed = stablecoin_at(chain_id, token_address)
+            if listed is None:
                 return _hold(["UNSUPPORTED_ASSET"],
-                             f"token {token_address} is not USDC on chain {chain_id} ({USDC_ADDRESSES[chain_id]}).")
-        elif chain_id not in NATIVE_USDC_CHAINS:
+                             f"token {token_address} is not a listed stablecoin on chain {chain_id} "
+                             f"({listed_on(chain_id)}).")
+            sym = listed[0]
+        elif not token_id and chain_id not in NATIVE_USDC_CHAINS:
             return _hold(["NATIVE_VALUE_TRANSFER"],
                          f"this is a native-token transfer on chain {chain_id}, which is not USDC.")
         amounts = body.get("amounts")
@@ -374,7 +378,8 @@ def check_circle_request(
         recipient = _text(body.get("destinationAddress"))
         if not recipient:
             return _hold(["INVALID_REQUEST"], "destinationAddress is required.")
-        return check_payment(chain_id=chain_id, sender=frm, recipient=recipient, amount=float(usdc), **policy)
+        return check_payment(chain_id=chain_id, sender=frm, recipient=recipient, amount=float(usdc), token=sym,
+                             **policy)
     except Exception as e:  # fail closed: no error path may approve
         return _verdict(ActionDecision.HOLD, ["CHECK_FAILED"],
                         f"The Circle Wallets request check failed ({type(e).__name__}), so it is held.",

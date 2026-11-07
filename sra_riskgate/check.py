@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Optional
 
 from sra_riskgate.account_code import account_hold
-from sra_riskgate.chains import USDC_ADDRESSES
+from sra_riskgate.chains import STABLECOINS, parse_allowed_tokens
 from sra_riskgate.client import DEFAULT_SANCTIONS_MAX_AGE_DAYS, RulePreFilter
 from sra_riskgate.counterparty import parse_address_list
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
@@ -12,7 +12,6 @@ from sra_riskgate.payload_claims import FLAG as CLAIMS_FLAG
 from sra_riskgate.payload_claims import scan_payload_claims
 from sra_riskgate.sanctions import SanctionsList
 
-_SUPPORTED_CHAINS = ", ".join(f"{c}" for c in sorted(USDC_ADDRESSES))
 
 
 def _verdict(decision: ActionDecision, flags: list, explanation: str, actions: list) -> RiskAssessment:
@@ -51,8 +50,9 @@ def check_payment(
     sanctions_max_age_days: Optional[int] = DEFAULT_SANCTIONS_MAX_AGE_DAYS,
     account_code: Any = None,
     expected_delegates: Optional[Iterable[str]] = None,
+    allowed_tokens: Optional[Iterable[str]] = None,
 ) -> RiskAssessment:
-    """Check a USDC payment before sending it. Never raises on bad payment data; anything unexpected becomes HOLD.
+    """Check a stablecoin payment before sending it. Never raises on bad payment data; anything unexpected becomes HOLD.
 
     Runs, in order:
       1. Sanctions: sender or recipient on the OFAC SDN list gives REJECT (flag OFAC_SDN_MATCH).
@@ -65,8 +65,12 @@ def check_payment(
           (ACCOUNT_DELEGATED): someone else may control the account. ``account_code`` may also be a mapping
           ``{address: code}``; then it must contain the sender (else HOLD, ACCOUNT_CODE_MISMATCH).
           ``expected_delegates`` is validated even without ``account_code``.
-      2. Supported asset and chain: USDC on Ethereum (1), Base (8453), Base Sepolia (84532),
-         Arc (5042) or Arc Testnet (5042002), otherwise HOLD.
+      2. Supported asset and chain: ``token`` must be one of ``allowed_tokens`` (default ``["USDC"]``) and
+         listed on ``chain_id``, otherwise HOLD (UNSUPPORTED_ASSET or UNSUPPORTED_CHAIN). Listed: USDC on
+         Ethereum (1), Base (8453), Base Sepolia (84532), Arc (5042) and Arc Testnet (5042002); USDT on
+         Ethereum; USDB (Bridge) on Ethereum and Base; USDG on Ethereum and Robinhood Chain (4663).
+         Enable the others with ``allowed_tokens=["USDC", "USDT", "USDB", "USDG"]``. ``max_amount`` and
+         ``peg_deviation_pct`` then apply to the token being paid: pass that token's own peg.
       3. Validation: malformed, zero or self address, or a non-positive amount, gives REJECT.
       4. Rules (``RulePreFilter``): per-payment ceiling and, if ``peg_deviation_pct`` is given,
          depeg thresholds. If ``known_recipients`` is given (even empty), a recipient not on it
@@ -95,6 +99,7 @@ def check_payment(
             known_recipients = parse_address_list("known_recipients", known_recipients)
             blocked_addresses = parse_address_list("blocked_addresses", blocked_addresses)
             compromised = account_hold(sender, account_code, expected_delegates)
+            allowed = parse_allowed_tokens(allowed_tokens)
         except ValueError as e:
             return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
                             f"The risk gate is misconfigured: {_first_error(e)}", ["fix_configuration"])
@@ -108,19 +113,25 @@ def check_payment(
         if compromised is not None:
             return compromised
 
-        if not isinstance(token, str) or token.strip().upper() != "USDC":
+        sym = token.strip().upper() if isinstance(token, str) else None
+        if sym not in STABLECOINS:
             return _verdict(ActionDecision.HOLD, ["UNSUPPORTED_ASSET"],
-                            f"Only USDC is checked; got {token!r}.", ["manual_review"])
-        if isinstance(chain_id, bool) or chain_id not in USDC_ADDRESSES:
+                            f"Only {', '.join(STABLECOINS)} are checked; got {token!r}.", ["manual_review"])
+        if sym not in allowed:
+            return _verdict(ActionDecision.HOLD, ["UNSUPPORTED_ASSET"],
+                            f"{sym} is not enabled for this gate (allowed_tokens: {', '.join(sorted(allowed))}). "
+                            f"Add it to allowed_tokens to check {sym} payments.", ["manual_review"])
+        if isinstance(chain_id, bool) or chain_id not in STABLECOINS[sym]:
+            chains = ", ".join(str(c) for c in sorted(STABLECOINS[sym]))
             return _verdict(ActionDecision.HOLD, ["UNSUPPORTED_CHAIN"],
-                            f"Chain {chain_id!r} is not checked; supported chain ids: {_SUPPORTED_CHAINS}.",
+                            f"Chain {chain_id!r} is not checked for {sym}; supported chain ids: {chains}.",
                             ["manual_review"])
 
         if isinstance(amount, bool):  # True would otherwise be read as 1.0 USDC
             return _verdict(ActionDecision.REJECT, ["INVALID_PAYMENT"],
                             "Payment failed validation: amount must be a number, not a boolean.", ["reject_payment"])
         try:
-            payload = TransactionPayload(chain_id=chain_id, token="USDC", sender=sender, recipient=recipient,
+            payload = TransactionPayload(chain_id=chain_id, token=sym, sender=sender, recipient=recipient,
                                          amount=amount, peg_deviation_pct=peg_deviation_pct)
         except (TypeError, ValueError) as e:
             return _verdict(ActionDecision.REJECT, ["INVALID_PAYMENT"],

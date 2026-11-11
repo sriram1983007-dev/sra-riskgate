@@ -128,6 +128,25 @@ its decimals, and whether it implements EIP-3009 and permit were read on chain b
 and Circle Gateway remain USDC-only: x402's EVM `exact` scheme signs EIP-3009, which only USDC implements
 here, and Gateway is a USDC product.
 
+### Your own stablecoin or chain (1.1.0+)
+
+Not on the list? Register a US-dollar stablecoin once at start-up, with the contract and `decimals()` you read
+from the chain yourself, and every check recognises it:
+
+```python
+from sra_riskgate import check_transaction, register_stablecoin
+
+register_stablecoin("PYUSD", 1, "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8", 6)   # another chain or token
+check_transaction(tx, allowed_tokens=["USDC", "PYUSD"], known_recipients=MY_PAYEES)
+```
+
+`check_payment`, `check_transaction`, `check_user_operation`, `verify_settlement(token=...)` and
+`check_allowances(token=...)` then treat it like a built-in token, and it is still held until you add it to
+`allowed_tokens`. Pass `eip3009=True` only if the contract implements `transferWithAuthorization`; otherwise
+an x402 signature for it is held, because it could never settle. A registration can never change USDC, USDT,
+USDB or USDG, or give a listed contract a second name. Amounts and limits assume the token is worth one US
+dollar, so do not register a token pegged to anything else.
+
 ### API stability
 
 From 1.0.0 the public API follows semantic versioning: the functions, arguments, decisions and flag names in this

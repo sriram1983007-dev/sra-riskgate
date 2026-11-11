@@ -4,7 +4,7 @@ from .payload_claims import PayloadClaim, scan_payload_claims
 from .check import check_payment
 from .transaction import check_delegation, check_transaction, decode_erc20_transfer
 from .allowance import check_allowances
-from .chains import STABLECOINS, stablecoin, stablecoin_at
+from .chains import STABLECOINS, register_stablecoin, registered_stablecoins, stablecoin, stablecoin_at
 from .authorization import check_authorization, check_x402_timeout
 from .user_operation import check_user_operation, decode_account_calls
 from .account_code import check_account_code, delegate_from_code
@@ -31,6 +31,8 @@ __all__ = [
     "STABLECOINS",
     "stablecoin",
     "stablecoin_at",
+    "register_stablecoin",
+    "registered_stablecoins",
     "check_user_operation",
     "decode_account_calls",
     "check_account_code",
@@ -47,4 +49,4 @@ __all__ = [
     "verify_gateway_balances",
     "SettlementCheck",
 ]
-__version__ = "1.0.0"
+__version__ = "1.1.0"

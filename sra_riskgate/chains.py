@@ -52,15 +52,86 @@ def stablecoin(symbol: object, chain_id: object) -> tuple[str, int]:
 
 DEFAULT_ALLOWED_TOKENS: tuple[str, ...] = ("USDC",)
 
-# Every chain where at least one listed stablecoin is checked.
-STABLECOIN_CHAINS: frozenset[int] = frozenset(c for chains in STABLECOINS.values() for c in chains)
+# Every chain where at least one listed stablecoin is checked. A set, not a frozenset, so that
+# register_stablecoin() can extend it in place and every module that imported it sees the change.
+STABLECOIN_CHAINS: set[int] = {c for chains in STABLECOINS.values() for c in chains}
 
 # Stablecoins that implement EIP-3009 transferWithAuthorization, the signature x402's ``exact`` scheme uses.
 # A TransferWithAuthorization for any other token could never settle, so it is held. Read on chain on
 # 2026-11-06 (contract code, authorizationState() and the EIP-712 domain separator): USDC on Ethereum and Base
 # implements it (domain "USD Coin", version "2"); USDT implements neither EIP-3009 nor EIP-2612 permit; USDB
 # (domain "USDBridge", "1") and USDG (domain "Global Dollar", "1") implement permit but not EIP-3009.
-EIP3009_TOKENS: frozenset[tuple[str, int]] = frozenset({("USDC", c) for c in USDC_ADDRESSES})
+EIP3009_TOKENS: set[tuple[str, int]] = {("USDC", c) for c in USDC_ADDRESSES}
+
+# The built-in table, frozen: register_stablecoin() may add tokens and chains but never change these.
+_BUILTIN: dict[str, dict[int, tuple[str, int]]] = {s: dict(c) for s, c in STABLECOINS.items()}
+_BUILTIN_EIP3009: frozenset[tuple[str, int]] = frozenset(EIP3009_TOKENS)
+_SYMBOL_OK = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.")
+
+
+def register_stablecoin(symbol: str, chain_id: int, contract: str, decimals: int, *,
+                        eip3009: bool = False) -> None:
+    """Add a US-dollar stablecoin the checks should recognise, on a chain this SDK does not list.
+
+    After ``register_stablecoin("TUSD8", 1234, "0x…", 6)``, every check treats that contract like a built-in
+    stablecoin: ``check_payment(token="TUSD8", ...)``, ``check_transaction`` (by contract address),
+    ``check_user_operation``, ``check_authorization`` (only with ``eip3009=True``; otherwise a
+    TransferWithAuthorization for it is held, since it could never settle), ``verify_settlement(token=...)``
+    and ``check_allowances(token=...)``. Payments in it are still held until you enable it with
+    ``allowed_tokens``, exactly like USDT, USDB and USDG.
+
+    Amounts, ``max_amount`` and batch totals assume the token is worth one US dollar; do not register a token
+    pegged to anything else. Read ``decimals()`` and the contract address from the chain yourself.
+
+    Registration is process-wide: do it once at start-up, before any checks run. It refuses (ValueError) to
+    change a built-in token, to reuse a symbol with different details on the same chain, or to give one
+    contract two symbols, so a registration can never redirect USDC, USDT, USDB or USDG to another address.
+    Registering the same details again is a no-op.
+    """
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValueError("symbol must be a non-empty string")
+    sym = symbol.strip().upper()
+    if len(sym) > 11 or not set(sym) <= _SYMBOL_OK:
+        raise ValueError(f"symbol {symbol!r} must be at most 11 letters, digits or dots")
+    if isinstance(chain_id, bool) or not isinstance(chain_id, int) or chain_id <= 0:
+        raise ValueError(f"chain_id must be a positive integer, got {chain_id!r}")
+    if (not isinstance(contract, str) or len(contract) != 42 or not contract.startswith(("0x", "0X"))
+            or any(ch not in "0123456789abcdefABCDEF" for ch in contract[2:]) or int(contract, 16) == 0):
+        raise ValueError(f"contract must be a non-zero 0x-prefixed 20-byte address, got {contract!r}")
+    if isinstance(decimals, bool) or not isinstance(decimals, int) or not 0 <= decimals <= 36:
+        raise ValueError(f"decimals must be an integer from 0 to 36, got {decimals!r}")
+    if not isinstance(eip3009, bool):
+        raise ValueError("eip3009 must be True or False")
+    if sym in _BUILTIN:
+        raise ValueError(f"{sym} is built in and cannot be registered or changed")
+    addr = "0x" + contract[2:].lower()
+    listed = stablecoin_at(chain_id, addr)
+    current = STABLECOINS.get(sym, {}).get(chain_id)
+    if current is not None:
+        if current[0].lower() == addr and current[1] == decimals and ((sym, chain_id) in EIP3009_TOKENS) == eip3009:
+            return
+        raise ValueError(f"{sym} is already registered on chain {chain_id} with different details")
+    if listed is not None:
+        raise ValueError(f"{addr} on chain {chain_id} is already listed as {listed[0]}")
+    STABLECOINS.setdefault(sym, {})[chain_id] = (addr, decimals)
+    STABLECOIN_CHAINS.add(chain_id)
+    if eip3009:
+        EIP3009_TOKENS.add((sym, chain_id))
+
+
+def registered_stablecoins() -> dict[str, dict[int, tuple[str, int]]]:
+    """The tokens added with register_stablecoin(), as symbol -> chain id -> (contract, decimals)."""
+    return {s: dict(c) for s, c in STABLECOINS.items() if s not in _BUILTIN}
+
+
+def _reset_registry() -> None:
+    """Remove every registered token (for tests)."""
+    for s in [s for s in STABLECOINS if s not in _BUILTIN]:
+        del STABLECOINS[s]
+    STABLECOIN_CHAINS.clear()
+    STABLECOIN_CHAINS.update(c for chains in _BUILTIN.values() for c in chains)
+    EIP3009_TOKENS.clear()
+    EIP3009_TOKENS.update(_BUILTIN_EIP3009)
 
 
 def stablecoin_at(chain_id: object, contract: object) -> Optional[tuple[str, int]]:

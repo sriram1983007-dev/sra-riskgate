@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.0 — 2026-11-10
+
+### Added
+- `register_stablecoin(symbol, chain_id, contract, decimals, *, eip3009=False)`: make every check recognise a
+  US-dollar stablecoin on a token or chain the SDK does not list (a testnet token, PYUSD, an L2's own dollar).
+  Once registered it gets `check_payment`, `check_transaction` (by contract address), `check_user_operation`,
+  `verify_settlement(token=...)` and `check_allowances(token=...)`, and `check_authorization` if declared
+  EIP-3009. It is still held until enabled with `allowed_tokens`.
+  - Refuses (ValueError) to change a built-in token, to reuse a symbol with different details, or to give one
+    contract two names, so a registration cannot redirect USDC, USDT, USDB or USDG. Same details again is a
+    no-op. Validates the symbol, chain id, contract address and decimals.
+- `registered_stablecoins()` lists what has been registered.
+
+### Changed
+- `STABLECOIN_CHAINS` and `EIP3009_TOKENS` are sets instead of frozensets, so registrations show up everywhere.
+- The smallest-unit check uses the token's decimals on the payment's chain, so one symbol can have different
+  decimals on different chains.
+
 ## 1.0.0 — 2026-11-06
 
 ### Added

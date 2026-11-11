@@ -65,7 +65,8 @@ class TransactionPayload(BaseModel):
         from sra_riskgate.chains import STABLECOINS
         sym = self.token.strip().upper() if isinstance(self.token, str) else None
         if sym in STABLECOINS:
-            decimals = next(iter(STABLECOINS[sym].values()))[1]
+            listed = STABLECOINS[sym].get(self.chain_id) or next(iter(STABLECOINS[sym].values()))
+            decimals = listed[1]
             try:
                 atomic = (Decimal(str(self.amount)) * (Decimal(10) ** decimals)).to_integral_value(
                     rounding=ROUND_DOWN)

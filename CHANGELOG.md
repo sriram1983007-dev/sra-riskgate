@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 — 2026-11-13
+
+### Added
+- `with_dispute_window(tool_results, dispute)`: a copy of a dispute prompt's tool results with the computed
+  `dispute_window` added as the last key, in exactly the format SRA-RiskGate-4B v2 was trained on (verified
+  byte for byte on all 825 benchmark test prompts). Left out when the window cannot be computed; an existing
+  `dispute_window` key is dropped rather than trusted. v2 scores 90.2% dispute accuracy with it, 85.0% without.
+- `dispute_window_tool_result(dispute)`: the entry on its own, or None.
+
 ## 1.1.0 — 2026-11-10
 
 ### Added

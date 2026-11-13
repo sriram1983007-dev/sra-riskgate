@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sra-riskgate"
-version = "1.1.0"
+version = "1.2.0"
 description = "Fail-closed checks for AI-agent stablecoin payments (USDC, USDT, USDB, USDG): OFAC SDN match, payee policy, limits, depeg, unsafe token approvals in transactions and x402 signatures, post-settlement receipt verification, and dispute-window verdicts"
 readme = "README.md"
 requires-python = ">=3.10"

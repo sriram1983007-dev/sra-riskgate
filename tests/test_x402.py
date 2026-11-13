@@ -7,6 +7,12 @@ try:  # needs x402 >= 2.25; coinbase-agentkit 0.7.x pins the older x402 1.x SDK
 except ImportError:
     pytest.skip("requires x402>=2.25 (pip install 'sra-riskgate[x402]')", allow_module_level=True)
 from x402.schemas import PaymentAbortedError, SchemeNotFoundError  # noqa: E402
+
+try:  # x402 >= 2.28 raises VerifyError / SettleError when a facilitator hook aborts
+    from x402.schemas.errors import SettleError, VerifyError  # noqa: E402
+    ABORTED = (PaymentAbortedError, VerifyError, SettleError)
+except ImportError:
+    ABORTED = (PaymentAbortedError,)
 from x402.schemas.payments import PaymentPayload, PaymentRequired, PaymentRequirements  # noqa: E402
 from x402.schemas.v1 import PaymentPayloadV1, PaymentRequirementsV1  # noqa: E402
 
@@ -40,7 +46,7 @@ def run_verify(hooks, requirements, pl=None):
         f.verify(pl or payload(requirements), requirements)
     except SchemeNotFoundError:
         return "passed"
-    except PaymentAbortedError as e:
+    except ABORTED as e:
         return str(e)
     raise AssertionError("verify returned without reaching the scheme lookup")
 
@@ -111,14 +117,14 @@ def test_v1_legacy_format_is_supported():
 def test_settle_hook_also_guards():
     f = facilitator(RiskGateX402Hooks(peg_feed=lambda c: -6.0))
     r = req()
-    with pytest.raises(PaymentAbortedError, match="sra_riskgate_reject"):
+    with pytest.raises(ABORTED, match="sra_riskgate_reject"):
         f.settle(payload(r), r)
 
 
 def test_async_facilitator():
     f = RiskGateX402Hooks(max_amount=1000).attach_to_facilitator(x402Facilitator())
     r = req(amount="5000000000")
-    with pytest.raises(PaymentAbortedError, match="sra_riskgate_hold"):
+    with pytest.raises(ABORTED, match="sra_riskgate_hold"):
         asyncio.run(f.verify(payload(r), r))
 
 
@@ -146,7 +152,7 @@ def test_client_hook_blocks_signing_before_any_payment_is_created():
     client = x402ClientSync().register(BASE_SEPOLIA, scheme)
     RiskGateX402Hooks(max_amount=0.5, payer_address=ME).attach_to_client(client)
 
-    with pytest.raises(PaymentAbortedError, match="sra_riskgate_hold"):
+    with pytest.raises(ABORTED, match="sra_riskgate_hold"):
         client.create_payment_payload(PaymentRequired(accepts=[req(amount="900000")]))   # 0.90 USDC
     assert scheme.signed == 0          # nothing was signed
 
@@ -158,7 +164,7 @@ def test_client_hook_blocks_payment_to_self():
     scheme = DummyScheme()
     client = x402ClientSync().register(BASE_SEPOLIA, scheme)
     RiskGateX402Hooks(payer_address=ME).attach_to_client(client)
-    with pytest.raises(PaymentAbortedError, match="sra_riskgate_invalid"):
+    with pytest.raises(ABORTED, match="sra_riskgate_invalid"):
         client.create_payment_payload(PaymentRequired(accepts=[req(amount="100000", pay_to=ME)]))
     assert scheme.signed == 0
 

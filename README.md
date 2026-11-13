@@ -483,6 +483,25 @@ and outcome accuracy rises from 77.8% to 78.7% (escalations count as misses). Re
 `python eval/dispute_window_check.py test.jsonl predictions.jsonl` on the files in
 [sra-bench-results](https://huggingface.co/datasets/sriram1983007/sra-bench-results).
 
+### Give SRA-RiskGate-4B v2 the window in its prompt (1.2.0+)
+
+SRA-RiskGate-4B v2 was trained with the computed window as the last entry of the dispute prompt's
+`<tool_results>`. Add it the same way:
+
+```python
+import json
+from sra_riskgate import with_dispute_window
+
+tool_results = with_dispute_window(tool_results, dispute)   # adds "dispute_window" when it can be computed
+user_message = ... + f"<tool_results>\n{json.dumps(tool_results)}\n</tool_results>"
+```
+
+The entry is `{"days_since_payment": 10.04, "window_days": 30.0, "within_window": true}`, in exactly the
+format v2 was trained on (all 825 benchmark test prompts rebuild byte for byte). If the dates are missing or
+the claim predates the payment, the entry is left out, as in training. With it, v2's dispute accuracy is
+90.2% on the benchmark, against 85.0% without it. `dispute_window_tool_result(dispute)` returns just the entry.
+Still run `check_dispute_verdict` on the verdict.
+
 ## Standing approvals: the risk in a pull payment (0.20.0+)
 
 When a lender, a subscription or any other contract pulls a payment with `transferFrom`, the agent signs nothing
@@ -638,7 +657,7 @@ client = RiskGateX402Hooks(max_amount=50, payer_address=MY_WALLET).attach_to_cli
 ```
 
 Rejected, held, malformed or unknown payments are aborted with a reason starting with
-`sra_riskgate_` (for example `sra_riskgate_hold`), which x402 raises as `PaymentAbortedError`.
+`sra_riskgate_` (for example `sra_riskgate_hold`), which x402 raises as `PaymentAbortedError` (on a facilitator, x402 2.28+ raises `VerifyError` or `SettleError` instead).
 USDC on Ethereum, Base, Base Sepolia, Arc and Arc Testnet is checked; other assets are aborted unless
 `allow_unsupported_assets=True`. Pass `peg_feed` to enable depeg checks and `on_decision` to log
 every decision. x402's own client spend controls stay active alongside these checks.

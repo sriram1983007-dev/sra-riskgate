@@ -7,7 +7,8 @@ Works with the official ``x402`` Python SDK (x402 Foundation) through its lifecy
 
 Every check fails closed. A rejected, held, malformed or unknown payment is aborted with an
 ``AbortResult`` whose reason starts with ``sra_riskgate_``; x402 then raises its own
-``PaymentAbortedError`` and no funds move.
+``PaymentAbortedError`` (``VerifyError`` or ``SettleError`` on a facilitator from x402 2.28) and no
+funds move.
 
 Example (facilitator)::
 

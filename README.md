@@ -657,7 +657,7 @@ client = RiskGateX402Hooks(max_amount=50, payer_address=MY_WALLET).attach_to_cli
 ```
 
 Rejected, held, malformed or unknown payments are aborted with a reason starting with
-`sra_riskgate_` (for example `sra_riskgate_hold`), which x402 raises as `PaymentAbortedError`.
+`sra_riskgate_` (for example `sra_riskgate_hold`), which x402 raises as `PaymentAbortedError` (on a facilitator, x402 2.28+ raises `VerifyError` or `SettleError` instead).
 USDC on Ethereum, Base, Base Sepolia, Arc and Arc Testnet is checked; other assets are aborted unless
 `allow_unsupported_assets=True`. Pass `peg_feed` to enable depeg checks and `on_decision` to log
 every decision. x402's own client spend controls stay active alongside these checks.

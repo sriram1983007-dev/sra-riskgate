@@ -9,6 +9,10 @@
   `dispute_window` key is dropped rather than trusted. v2 scores 90.2% dispute accuracy with it, 85.0% without.
 - `dispute_window_tool_result(dispute)`: the entry on its own, or None.
 
+### Fixed
+- x402 2.28 raises `VerifyError` / `SettleError` (not `PaymentAbortedError`) when a facilitator hook aborts. The
+  hooks were already failing closed; the tests and docs now accept both, so CI passes on x402 2.25 to 2.28.
+
 ## 1.1.0 — 2026-11-10
 
 ### Added

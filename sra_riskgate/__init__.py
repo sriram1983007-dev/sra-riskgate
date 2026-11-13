@@ -10,6 +10,8 @@ from .user_operation import check_user_operation, decode_account_calls
 from .account_code import check_account_code, delegate_from_code
 from .circle_wallets import CircleRequestBlocked, check_circle_request, guard_circle_wallets
 from .disputes import DisputeWindow, check_dispute_verdict, dispute_window, dispute_window_tool_result, with_dispute_window
+from .prompts import (DISPUTE_SYSTEM_PROMPT, PAYMENT_SYSTEM_PROMPT, dispute_messages, parse_dispute_verdict,
+                      parse_payment_verdict, payment_messages)
 from .sanctions import SanctionsList, is_sanctioned
 from .settlement import SettlementCheck, verify_gateway_balances, verify_settlement
 
@@ -44,6 +46,12 @@ __all__ = [
     "dispute_window",
     "dispute_window_tool_result",
     "with_dispute_window",
+    "PAYMENT_SYSTEM_PROMPT",
+    "DISPUTE_SYSTEM_PROMPT",
+    "payment_messages",
+    "dispute_messages",
+    "parse_payment_verdict",
+    "parse_dispute_verdict",
     "DisputeWindow",
     "SanctionsList",
     "is_sanctioned",
@@ -51,4 +59,4 @@ __all__ = [
     "verify_gateway_balances",
     "SettlementCheck",
 ]
-__version__ = "1.2.0"
+__version__ = "1.3.0"

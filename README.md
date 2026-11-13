@@ -502,6 +502,31 @@ the claim predates the payment, the entry is left out, as in training. With it, 
 90.2% on the benchmark, against 85.0% without it. `dispute_window_tool_result(dispute)` returns just the entry.
 Still run `check_dispute_verdict` on the verdict.
 
+## Prompts for the SRA-RiskGate-4B model (1.3.0+)
+
+The [model](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) only performs as benchmarked with the exact
+prompts it was trained on. `payment_messages` and `dispute_messages` build them (all 2,000 benchmark test prompts
+rebuild byte for byte), and the parsers read its answer, failing closed. No model is loaded here: send the
+messages to the model however you run it.
+
+```python
+from sra_riskgate import payment_messages, parse_payment_verdict
+
+messages = payment_messages(policy, payload, tool_results)        # now defaults to the current time
+# e.g. Ollama: ollama.chat("sriram1983007/sra-riskgate", messages=messages)["message"]["content"]
+verdict = parse_payment_verdict(model_output)
+if verdict["decision"] != "approve":
+    ...  # do not sign
+```
+
+- `parse_payment_verdict` returns the verdict if it matches the trained schema exactly; anything else becomes a
+  `hold` flagged `model_output_unreadable`, never an approval.
+- `dispute_messages(policy, case, tool_results)` adds the computed dispute window by default, as v2 was trained
+  (`add_window=False` gives the original v1 prompts). `parse_dispute_verdict` fails closed to
+  `escalate_to_human`; then run `check_dispute_verdict` before acting.
+- `PAYMENT_SYSTEM_PROMPT` and `DISPUTE_SYSTEM_PROMPT` are the trained system prompts.
+- Use the model on top of the deterministic checks above, not instead of them.
+
 ## Standing approvals: the risk in a pull payment (0.20.0+)
 
 When a lender, a subscription or any other contract pulls a payment with `transferFrom`, the agent signs nothing

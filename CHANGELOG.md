@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0 — 2026-11-13
+
+### Added
+- `payment_messages(policy, payload, tool_results, now=None)` and `dispute_messages(policy, case, tool_results,
+  now=None, add_window=True)`: the chat messages for SRA-RiskGate-4B, exactly as trained. Verified byte for byte
+  on all 2,000 benchmark test prompts (1,175 payments; 825 disputes in both the v1 and the v2 format).
+- `parse_payment_verdict(text)` and `parse_dispute_verdict(text)`: accept a verdict only if it matches the trained
+  schema exactly; anything else fails closed to a hold (payments) or `escalate_to_human` (disputes). All 2,000
+  gold answers parse unchanged.
+- `PAYMENT_SYSTEM_PROMPT`, `DISPUTE_SYSTEM_PROMPT`.
+
 ## 1.2.0 — 2026-11-13
 
 ### Added

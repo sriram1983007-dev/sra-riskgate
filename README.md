@@ -529,9 +529,11 @@ result = check_payment(
 - **Only after the local checks pass**, so an invalid payment makes no network calls. Both the sender and the
   recipient are screened; only their addresses are sent to the provider.
 - **Built in:** `ChainalysisSanctions` (Chainalysis's free sanctions API), `TRMSanctions` (TRM Labs' free
-  sanctions API, 1.5.0+), `RangeRisk` (Range Risk API v2,
-  `severity` as the risk level, any triggered `sanctions*` signal as a match) and `WebacyRisk` (Webacy address
-  risk). Bring your own API keys.
+  sanctions API, 1.5.0+; the key is optional from 1.6.1), `RangeRisk` (Range Risk API v2, Bearer auth:
+  `severity` as the risk level, and a triggered attribution signal for any government sanctions list, such as
+  `ofac-sanctioned`, `uk-sanctioned`, `eu-sanctioned` or `eu-sanction-ru`, as a match) and `WebacyRisk`
+  (Webacy address risk, level from its high- and medium-severity issue counts, `overallRisk` kept in the
+  reasons). Bring your own API keys.
 - **Anything else** (another vendor, an internal list) plugs in with `CallableProvider`:
 
 ```python
@@ -549,6 +551,7 @@ log or show them. The adapters follow each provider's published API documentatio
 tests use response shapes from that documentation, not live calls. TRM shares its full API documentation and a
 key after a sign-up form; `TRMSanctions` follows its published operation (`POST /public/v1/sanctions/screening`
 with `[{"address": ...}]`, answer `isSanctioned`), and any other answer holds the payment rather than passing it.
+`TRMSanctions()` without a key sends no credentials; if TRM requires one, every check holds.
 
 ## Prompts for the SRA-RiskGate-4B model (1.3.0+)
 

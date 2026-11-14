@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.1 — 2026-11-14
+
+### Fixed
+- `RangeRisk` now treats every sanctions-list signal Range documents as a sanctions match (`ofac-sanctioned`,
+  `uk-sanctioned`, `eu-sanctioned`, `eu-sanction-ru`, `france-sanctioned`, `japan-sanctioned`, `sanctioned`,
+  `nbctf-terror-financing`). 1.4.0-1.6.0 matched only signal ids starting with `sanction`, so such a sanctions hit
+  was judged only by the severity Range's workspace gave it: held at `high`, and passed below that. Range exposure signals are now
+  listed in the reasons, and the adapter uses Range's documented Bearer authentication. Reported by an external
+  audit.
+- `TRMSanctions` accepts no API key, for TRM's keyless free access; an empty key is still an error.
+- `WebacyRisk` keeps Webacy's `overallRisk` score in the reasons.
+
 ## 1.6.0 — 2026-11-14
 
 ### Fixed

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0 — 2026-11-14
+
+### Added
+- Screening providers in `check_payment(screening_providers=[...], screening_hold_at="high",
+  screening_reject_at="severe")`: a provider's sanctions match gives REJECT (`PROVIDER_SANCTIONS_MATCH`), severe
+  risk REJECT (`PROVIDER_RISK_SEVERE`), high risk HOLD (`PROVIDER_RISK_HIGH`), and no usable answer HOLD
+  (`SCREENING_UNAVAILABLE`). Runs only after every local check passes; screens sender and recipient.
+- Adapters: `ChainalysisSanctions` (free sanctions API), `RangeRisk` (Range Risk API v2), `WebacyRisk` (Webacy
+  address risk), and `CallableProvider` for anything else (e.g. TRM Labs).
+- `screen_addresses()` and `ScreeningResult` for logging the raw results.
+
 ## 1.3.0 — 2026-11-13
 
 ### Added

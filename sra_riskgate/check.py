@@ -11,6 +11,7 @@ from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPaylo
 from sra_riskgate.payload_claims import FLAG as CLAIMS_FLAG
 from sra_riskgate.payload_claims import scan_payload_claims
 from sra_riskgate.sanctions import SanctionsList
+from sra_riskgate.screening import screen_addresses, screening_decision
 
 
 
@@ -51,6 +52,9 @@ def check_payment(
     account_code: Any = None,
     expected_delegates: Optional[Iterable[str]] = None,
     allowed_tokens: Optional[Iterable[str]] = None,
+    screening_providers: Optional[Iterable[Any]] = None,
+    screening_hold_at: str = "high",
+    screening_reject_at: str = "severe",
 ) -> RiskAssessment:
     """Check a stablecoin payment before sending it. Never raises on bad payment data; anything unexpected becomes HOLD.
 
@@ -76,6 +80,11 @@ def check_payment(
          depeg thresholds. If ``known_recipients`` is given (even empty), a recipient not on it
          gives HOLD (NEW_COUNTERPARTY), and one that imitates a known payee (same first and last hex
          characters) gives REJECT (LOOKALIKE_RECIPIENT): address poisoning. ``None`` turns both off.
+      4b. Screening providers (1.4.0+): if ``screening_providers`` is given (e.g. ``[ChainalysisSanctions(key),
+          RangeRisk(key)]``), each screens the sender and the recipient. A sanctions match gives REJECT
+          (PROVIDER_SANCTIONS_MATCH); risk at or above ``screening_reject_at`` gives REJECT (PROVIDER_RISK_SEVERE),
+          at or above ``screening_hold_at`` HOLD (PROVIDER_RISK_HIGH). A provider with no usable answer gives HOLD
+          (SCREENING_UNAVAILABLE). Runs only after every local check passes, so invalid payments make no calls.
       5. Self-asserted claims in ``untrusted_request`` (the payment request, memo or description
          exactly as received), such as "risk level: low (verified offline)", give HOLD.
          Never pass your own verification results here: those legitimately say "verified".
@@ -100,7 +109,12 @@ def check_payment(
             blocked_addresses = parse_address_list("blocked_addresses", blocked_addresses)
             compromised = account_hold(sender, account_code, expected_delegates)
             allowed = parse_allowed_tokens(allowed_tokens)
-        except ValueError as e:
+            providers = list(screening_providers) if screening_providers is not None else []
+            if screening_providers is not None and (isinstance(screening_providers, (str, bytes)) or not providers
+                                                    or not all(callable(getattr(p, "screen", None)) for p in providers)):
+                raise ValueError("screening_providers must be a non-empty list of providers with a screen() method")
+            screening_decision([], hold_at=screening_hold_at, reject_at=screening_reject_at)  # validates thresholds
+        except (TypeError, ValueError) as e:
             return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
                             f"The risk gate is misconfigured: {_first_error(e)}", ["fix_configuration"])
 
@@ -138,7 +152,20 @@ def check_payment(
                             f"Payment failed validation: {_first_error(e)}", ["reject_payment"])
 
         result = gate.inspect(payload, known_recipients=known_recipients, blocked_addresses=blocked_addresses)
-        if result.decision == ActionDecision.REJECT or untrusted_request is None:
+        if result.decision == ActionDecision.REJECT:
+            return result
+        if providers:
+            screened = screening_decision(screen_addresses(providers, [sender, recipient], chain_id),
+                                          hold_at=screening_hold_at, reject_at=screening_reject_at)
+            if screened is not None:
+                kind, sflags, why = screened
+                if kind == "reject":
+                    return _verdict(ActionDecision.REJECT, sflags, why, ["block_payment"])
+                if result.decision == ActionDecision.HOLD:
+                    why += " Also: " + result.explanation
+                    sflags = sflags + [f for f in result.flags if f not in sflags]
+                result = _verdict(ActionDecision.HOLD, sflags, why, ["manual_review"])
+        if untrusted_request is None:
             return result
 
         claims = scan_payload_claims(untrusted_request)

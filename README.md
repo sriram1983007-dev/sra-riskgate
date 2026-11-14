@@ -502,6 +502,49 @@ the claim predates the payment, the entry is left out, as in training. With it, 
 90.2% on the benchmark, against 85.0% without it. `dispute_window_tool_result(dispute)` returns just the entry.
 Still run `check_dispute_verdict` on the verdict.
 
+## Screening providers: Chainalysis, Range, Webacy and your own (1.4.0+)
+
+The bundled OFAC snapshot is an exact match against a dated list. Screening providers add fresher sanctions
+data and risk attribution (hacks, scams, mixers, exposure). Plug them into the same one-call check:
+
+```python
+from sra_riskgate import ChainalysisSanctions, RangeRisk, WebacyRisk, check_payment
+
+result = check_payment(
+    chain_id=8453, sender=agent_wallet, recipient=payee, amount=12.5,
+    screening_providers=[ChainalysisSanctions(CHAINALYSIS_KEY), RangeRisk(RANGE_KEY)],
+)
+```
+
+| Outcome from any provider | Decision | Flag |
+| --- | --- | --- |
+| Sanctions match | REJECT | `PROVIDER_SANCTIONS_MATCH` |
+| Risk at or above `screening_reject_at` (default `severe`) | REJECT | `PROVIDER_RISK_SEVERE` |
+| Risk at or above `screening_hold_at` (default `high`) | HOLD | `PROVIDER_RISK_HIGH` |
+| Error, timeout or an unexpected answer | HOLD | `SCREENING_UNAVAILABLE` |
+
+- **Fail closed:** no answer is never treated as a clean answer.
+- **Only after the local checks pass**, so an invalid payment makes no network calls. Both the sender and the
+  recipient are screened; only their addresses are sent to the provider.
+- **Built in:** `ChainalysisSanctions` (Chainalysis's free sanctions API), `RangeRisk` (Range Risk API v2,
+  `severity` as the risk level, any triggered `sanctions*` signal as a match) and `WebacyRisk` (Webacy address
+  risk). Bring your own API keys.
+- **Anything else** (TRM Labs, an internal list) plugs in with `CallableProvider`:
+
+```python
+from sra_riskgate import CallableProvider
+
+def my_lookup(address, chain_id):
+    ...  # call your provider here
+    return {"sanctioned": False, "risk": "medium", "reasons": ["mixer exposure"]}
+
+provider = CallableProvider("my-provider", my_lookup)
+```
+
+`screen_addresses(providers, addresses, chain_id)` returns every provider's raw `ScreeningResult` if you want to
+log or show them. The adapters follow each provider's published API documentation as of November 2026; their
+tests use recorded response shapes, not live calls.
+
 ## Prompts for the SRA-RiskGate-4B model (1.3.0+)
 
 The [model](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) only performs as benchmarked with the exact

@@ -57,11 +57,14 @@ DEFAULT_ALLOWED_TOKENS: tuple[str, ...] = ("USDC",)
 STABLECOIN_CHAINS: set[int] = {c for chains in STABLECOINS.values() for c in chains}
 
 # Stablecoins that implement EIP-3009 transferWithAuthorization, the signature x402's ``exact`` scheme uses.
-# A TransferWithAuthorization for any other token could never settle, so it is held. Read on chain on
-# 2026-11-06 (contract code, authorizationState() and the EIP-712 domain separator): USDC on Ethereum and Base
-# implements it (domain "USD Coin", version "2"); USDT implements neither EIP-3009 nor EIP-2612 permit; USDB
-# (domain "USDBridge", "1") and USDG (domain "Global Dollar", "1") implement permit but not EIP-3009.
-EIP3009_TOKENS: set[tuple[str, int]] = {("USDC", c) for c in USDC_ADDRESSES}
+# A TransferWithAuthorization for any other token could never settle, so it is held. Read on chain: USDC on
+# Ethereum and Base implements it (domain "USD Coin", version "2"). USDG (domain "Global Dollar", "1") implements
+# it on Ethereum and Robinhood Chain: re-read on 2026-11-14, its TRANSFER_WITH_AUTHORIZATION_TYPEHASH() is the
+# EIP-3009 one, authorizationState() answers, and transferWithAuthorization() with a bad signature reverts with
+# InvalidSignature() (0x8baa579f). The 2026-11-06 read missed this because it searched the proxy's implementation
+# code for the function selector. USDT implements neither EIP-3009 nor EIP-2612 permit; USDB (domain
+# "USDBridge", "1") implements permit but not EIP-3009.
+EIP3009_TOKENS: set[tuple[str, int]] = {("USDC", c) for c in USDC_ADDRESSES} | {("USDG", 1), ("USDG", 4663)}
 
 # The built-in table, frozen: register_stablecoin() may add tokens and chains but never change these.
 _BUILTIN: dict[str, dict[int, tuple[str, int]]] = {s: dict(c) for s, c in STABLECOINS.items()}

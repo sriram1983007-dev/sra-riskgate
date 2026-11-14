@@ -531,9 +531,10 @@ result = check_payment(
 - **Built in:** `ChainalysisSanctions` (Chainalysis's free sanctions API), `TRMSanctions` (TRM Labs' free
   sanctions API, 1.5.0+; the key is optional from 1.6.1), `RangeRisk` (Range Risk API v2, Bearer auth:
   `severity` as the risk level, and a triggered attribution signal for any government sanctions list, such as
-  `ofac-sanctioned`, `uk-sanctioned`, `eu-sanctioned` or `eu-sanction-ru`, as a match) and `WebacyRisk`
-  (Webacy address risk, level from its high- and medium-severity issue counts, `overallRisk` kept in the
-  reasons). Bring your own API keys.
+  `ofac-sanctioned`, `uk-sanctioned`, `eu-sanctioned` or `eu-sanction-ru`, as a match; sanctions exposure raises
+  the level to at least `high`) and `WebacyRisk` (Webacy address risk, level from its high- and medium-severity
+  issue counts, and at least `high` when `overallRisk` reaches `high_risk_score`, default 100). Bring your own
+  API keys.
 - **Anything else** (another vendor, an internal list) plugs in with `CallableProvider`:
 
 ```python

@@ -162,6 +162,8 @@ def parse_allowed_tokens(allowed: object) -> frozenset[str]:
         return frozenset(DEFAULT_ALLOWED_TOKENS)
     if isinstance(allowed, str):
         allowed = [p for p in allowed.replace(",", " ").split() if p]
+    if isinstance(allowed, (dict, bytes, bytearray)) or hasattr(allowed, "keys"):
+        raise ValueError("allowed_tokens must be a list of stablecoin symbols, not a mapping or bytes")
     try:
         items = list(allowed)  # type: ignore[call-overload]
     except TypeError:

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.2 — 2026-11-14
+
+### Fixed
+- `RangeRisk`: a triggered sanctions-list signal in Range's exposure pillar (funds from or to a sanctioned
+  address) now raises the risk level to at least `high`, so it holds by default whatever severity Range gave
+  it. It is not treated as a direct match, so it never rejects on its own.
+- `WebacyRisk` reads `overallRisk`: a score at or above `high_risk_score` (default 100, the value Webacy's
+  documentation calls high risk) gives at least `high`. Lower it to match the score bands you use.
+- `allowed_tokens` given as a mapping or bytes is a configuration error (REJECT) instead of being read as its keys.
+- The 1.0.0 changelog entry now notes that its EIP-3009 statement was corrected in 1.6.0.
+
+All reported by an external audit.
+
 ## 1.6.1 — 2026-11-14
 
 ### Fixed
@@ -92,7 +105,8 @@
   (any subset). A token not enabled is held as `UNSUPPORTED_ASSET`, naming `allowed_tokens`.
   - `check_transaction` identifies the token by the contract it calls, and reads its decimals from the table.
     Approvals and permits are held for every listed token, enabled or not.
-  - `check_authorization`: only USDC implements EIP-3009, so a `TransferWithAuthorization` for USDT, USDB or USDG
+  - `check_authorization` (corrected in 1.6.0: USDG implements EIP-3009 too, and its x402 signatures are checked):
+    only USDC implements EIP-3009, so a `TransferWithAuthorization` for USDT, USDB or USDG
     is held as `UNSUPPORTED_SIGNATURE` (it could never settle). Permits for USDB and USDG are held as
     `TOKEN_APPROVAL`. Read on chain on 2026-11-06: USDB (domain "USDBridge", "1") and USDG ("Global Dollar",
     "1") implement EIP-2612 permit but not EIP-3009; USDT implements neither.

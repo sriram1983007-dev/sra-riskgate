@@ -137,8 +137,9 @@ class RangeRisk(_HttpProvider):
     government sanctions list is a sanctions match, whatever severity your Range workspace gives it: every
     signal id containing ``sanction`` (``ofac-sanctioned``, ``uk-sanctioned``, ``eu-sanctioned``,
     ``eu-sanction-ru``, ``france-sanctioned``, ``japan-sanctioned``, ``sanctioned``...) and
-    ``nbctf-terror-financing``. Exposure signals (indirect flows) are reported as reasons and count through
-    ``severity``, not as direct matches."""
+    ``nbctf-terror-financing``. A triggered exposure signal for a sanctions list (funds that came from or went
+    to a sanctioned address) is not a direct match, but raises the risk level to at least ``high``, so it holds by
+    default whatever severity Range gave it (1.6.2+)."""
 
     name = "range"
     BASE_URL = "https://api.range.org/v2/risk/address"
@@ -157,8 +158,10 @@ class RangeRisk(_HttpProvider):
                      and _is_sanctions_signal(t.get("signal"))]
         reasons = [str(t.get("signal")) for t in triggered if isinstance(t, Mapping) and t.get("result") is True]
         exposure = (body.get("exposure") or {}).get("triggered") if isinstance(body.get("exposure"), Mapping) else None
-        reasons += [f"exposure: {e.get('signal')} {e.get('percentage', '')}".strip() for e in exposure or []
-                    if isinstance(e, Mapping) and e.get("result") is True]
+        hit_exposure = [e for e in exposure or [] if isinstance(e, Mapping) and e.get("result") is True]
+        reasons += [f"exposure: {e.get('signal')} {e.get('percentage', '')}".strip() for e in hit_exposure]
+        if any(_is_sanctions_signal(e.get("signal")) for e in hit_exposure) and RISK_ORDER[sev] < RISK_ORDER["high"]:
+            sev = "high"
         behaviours = (body.get("behaviour") or {}).get("detected") if isinstance(body.get("behaviour"), Mapping) else None
         reasons += [str(b.get("behaviour")) for b in behaviours or [] if isinstance(b, Mapping) and not b.get("ignored")]
         return ScreeningResult(self.name, address, sanctioned=bool(sanctions), risk=sev, reasons=reasons, raw=body)
@@ -174,11 +177,19 @@ class WebacyRisk(_HttpProvider):
 
     A ``sanctioned`` flag in ``details.address_info`` is a sanctions match. Otherwise the risk level comes from
     Webacy's own issue counts: any high-severity issue gives ``high``, any medium one ``medium``, else ``low``.
+    An ``overallRisk`` score at or above ``high_risk_score`` (default 100, the value Webacy's documentation calls
+    high risk) also gives at least ``high``; lower it if you use Webacy's own score bands (1.6.2+).
     A 202 (analysis still running) is treated as no answer."""
 
     name = "webacy"
     BASE_URL = "https://api.webacy.com/addresses/"
     CHAINS = {1: "eth", 8453: "base", 137: "pol", 42161: "arb", 56: "bsc", 10: "opt"}
+
+    def __init__(self, api_key: str, *, high_risk_score: float = 100, **kw):
+        super().__init__(api_key, **kw)
+        if isinstance(high_risk_score, bool) or not isinstance(high_risk_score, (int, float)) or high_risk_score <= 0:
+            raise ValueError("high_risk_score must be a positive number")
+        self.high_risk_score = float(high_risk_score)
 
     def screen(self, address: str, chain_id: int) -> ScreeningResult:
         chain = self.CHAINS.get(chain_id)
@@ -193,7 +204,10 @@ class WebacyRisk(_HttpProvider):
             return _fail(self.name, address, f"unexpected response (HTTP {status})", body)
         info = (body.get("details") or {}).get("address_info") or {} if isinstance(body.get("details"), Mapping) else {}
         sanctioned = info.get("sanctioned") is True
-        risk = "severe" if sanctioned else "high" if body["high"] > 0 else "medium" if body.get("medium", 0) > 0 else "low"
+        score = body.get("overallRisk")
+        scored_high = isinstance(score, (int, float)) and not isinstance(score, bool) and score >= self.high_risk_score
+        risk = ("severe" if sanctioned else "high" if body["high"] > 0 or scored_high
+                else "medium" if body.get("medium", 0) > 0 else "low")
         reasons = [f"overallRisk {body['overallRisk']}"] if isinstance(body.get("overallRisk"), (int, float)) else []
         for issue in body.get("issues") or []:
             for tag in (issue.get("tags") or []) if isinstance(issue, Mapping) else []:

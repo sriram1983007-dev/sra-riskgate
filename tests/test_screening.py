@@ -261,3 +261,37 @@ def test_range_exposure_is_reported_and_counts_through_severity():
 def test_webacy_reports_overall_risk():
     r = WebacyRisk("k", http_get=FakeHttp(webacy(high=1))).screen(PAYEE, 8453)
     assert r.reasons[0] == "overallRisk 10"
+
+
+# ---- 1.6.2: Range sanctions exposure, Webacy overallRisk, mapping allowed_tokens
+@pytest.mark.parametrize("severity", ["none", "low", "medium"])
+def test_range_sanctions_exposure_holds_whatever_the_severity(severity):
+    body = {**RANGE_OK, "severity": severity, "exposure": {"triggered": [
+        {"signal": "ofac-sanctioned", "mode": "percentage", "result": True, "percentage": "3.10%", "summary": "x"}]}}
+    r = RangeRisk("k", http_get=FakeHttp((200, body))).screen(PAYEE, 8453)
+    assert r.sanctioned is False and r.risk == "high"
+    out = check_payment(**BASE, screening_providers=[RangeRisk("k", http_get=FakeHttp((200, body)))])
+    assert out.decision == ActionDecision.HOLD and "PROVIDER_RISK_HIGH" in out.flags
+
+
+def test_range_non_sanctions_exposure_keeps_range_severity():
+    body = {**RANGE_OK, "severity": "low", "exposure": {"triggered": [
+        {"signal": "compliance-risk", "mode": "percentage", "result": True, "percentage": "1.00%", "summary": "x"}]}}
+    assert RangeRisk("k", http_get=FakeHttp((200, body))).screen(PAYEE, 8453).risk == "low"
+
+
+def test_webacy_overall_risk_score_raises_risk():
+    hi = (200, {"overallRisk": 100, "high": 0, "medium": 0, "count": 0, "issues": [], "details": {"address_info": {}}})
+    mid = (200, {"overallRisk": 95, "high": 0, "medium": 0, "count": 0, "issues": [], "details": {"address_info": {}}})
+    assert WebacyRisk("k", http_get=FakeHttp(hi)).screen(PAYEE, 1).risk == "high"
+    assert WebacyRisk("k", http_get=FakeHttp(mid)).screen(PAYEE, 1).risk == "low"
+    assert WebacyRisk("k", http_get=FakeHttp(mid), high_risk_score=90).screen(PAYEE, 1).risk == "high"
+    for bad in (0, -5, True, "90"):
+        with pytest.raises(ValueError):
+            WebacyRisk("k", high_risk_score=bad)
+
+
+@pytest.mark.parametrize("tokens", [{"USDC": True}, {"USDC": 1, "USDT": 1}, b"USDC"])
+def test_mapping_or_bytes_allowed_tokens_is_a_configuration_error(tokens):
+    r = check_payment(**BASE, allowed_tokens=tokens)
+    assert r.decision == ActionDecision.REJECT and r.flags == ["CONFIGURATION_ERROR"]

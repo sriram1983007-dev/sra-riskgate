@@ -504,6 +504,8 @@ Still run `check_dispute_verdict` on the verdict.
 
 ## Screening providers: Chainalysis, Range, Webacy and your own (1.4.0+)
 
+TRM Labs is built in too, from 1.5.0.
+
 The bundled OFAC snapshot is an exact match against a dated list. Screening providers add fresher sanctions
 data and risk attribution (hacks, scams, mixers, exposure). Plug them into the same one-call check:
 
@@ -526,10 +528,11 @@ result = check_payment(
 - **Fail closed:** no answer is never treated as a clean answer.
 - **Only after the local checks pass**, so an invalid payment makes no network calls. Both the sender and the
   recipient are screened; only their addresses are sent to the provider.
-- **Built in:** `ChainalysisSanctions` (Chainalysis's free sanctions API), `RangeRisk` (Range Risk API v2,
+- **Built in:** `ChainalysisSanctions` (Chainalysis's free sanctions API), `TRMSanctions` (TRM Labs' free
+  sanctions API, 1.5.0+), `RangeRisk` (Range Risk API v2,
   `severity` as the risk level, any triggered `sanctions*` signal as a match) and `WebacyRisk` (Webacy address
   risk). Bring your own API keys.
-- **Anything else** (TRM Labs, an internal list) plugs in with `CallableProvider`:
+- **Anything else** (another vendor, an internal list) plugs in with `CallableProvider`:
 
 ```python
 from sra_riskgate import CallableProvider
@@ -543,7 +546,9 @@ provider = CallableProvider("my-provider", my_lookup)
 
 `screen_addresses(providers, addresses, chain_id)` returns every provider's raw `ScreeningResult` if you want to
 log or show them. The adapters follow each provider's published API documentation as of November 2026; their
-tests use recorded response shapes, not live calls.
+tests use response shapes from that documentation, not live calls. TRM shares its full API documentation and a
+key after a sign-up form; `TRMSanctions` follows its published operation (`POST /public/v1/sanctions/screening`
+with `[{"address": ...}]`, answer `isSanctioned`), and any other answer holds the payment rather than passing it.
 
 ## Prompts for the SRA-RiskGate-4B model (1.3.0+)
 

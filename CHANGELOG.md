@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0 — 2026-11-14
+
+### Added
+- `TRMSanctions(api_key)`: TRM Labs' free sanctions screening API as a screening provider
+  (`POST https://api.trmlabs.com/public/v1/sanctions/screening`, HTTP Basic auth). A sanctions match rejects;
+  any answer that is not a clear `isSanctioned` for the address holds the payment (fail closed).
+
 ## 1.4.0 — 2026-11-14
 
 ### Added

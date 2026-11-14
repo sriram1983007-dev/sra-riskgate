@@ -11,8 +11,9 @@ then applies one policy to all of them:
 - a provider that errors, times out or answers in an unexpected shape gives HOLD (``SCREENING_UNAVAILABLE``):
   no answer is never treated as a clean answer.
 
-Built in: ``ChainalysisSanctions`` (Chainalysis's free sanctions API), ``RangeRisk`` (Range Risk API v2) and
-``WebacyRisk`` (Webacy address risk). Anything else, such as TRM Labs, plugs in through ``CallableProvider``.
+Built in: ``ChainalysisSanctions`` (Chainalysis's free sanctions API), ``TRMSanctions`` (TRM Labs' free sanctions
+API, 1.5.0+), ``RangeRisk`` (Range Risk API v2) and ``WebacyRisk`` (Webacy address risk). Anything else plugs in
+through ``CallableProvider``.
 Screening sends the sender's and recipient's addresses to the provider; nothing else leaves your process.
 No API keys are bundled; you need an account with each provider.
 """
@@ -37,6 +38,24 @@ def _urllib_get(url: str, headers: Mapping[str, str], timeout: float) -> "tuple[
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed https URLs)
             body = resp.read()
             return resp.status, json.loads(body) if body else None
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"null")
+        except ValueError:
+            return e.code, None
+
+
+HttpPost = Callable[[str, Mapping[str, str], Any, float], "tuple[int, Any]"]
+
+
+def _urllib_post(url: str, headers: Mapping[str, str], body: Any, timeout: float) -> "tuple[int, Any]":
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method="POST", headers={
+        "Accept": "application/json", "Content-Type": "application/json", "User-Agent": "sra-riskgate", **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed https URL)
+            raw = resp.read()
+            return resp.status, json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read() or b"null")
@@ -169,6 +188,41 @@ class WebacyRisk(_HttpProvider):
                 if isinstance(tag, Mapping) and tag.get("name"):
                     reasons.append(str(tag["name"]))
         return ScreeningResult(self.name, address, sanctioned=sanctioned, risk=risk, reasons=reasons, raw=body)
+
+
+class TRMSanctions:
+    """TRM Labs' free sanctions screening API (``POST https://api.trmlabs.com/public/v1/sanctions/screening``).
+
+    Sends ``[{"address": ...}]`` with HTTP Basic auth (the API key as both user name and password) and reads
+    ``isSanctioned`` for the matching address. TRM sends its full documentation and a key after a sign-up form;
+    if your key or TRM's answer does not match this shape, every check returns no answer, which holds the payment
+    (fail closed) rather than passing it. Sanctions only: the risk level is ``severe`` or ``none``."""
+
+    name = "trm"
+    URL = "https://api.trmlabs.com/public/v1/sanctions/screening"
+
+    def __init__(self, api_key: str, *, timeout: float = 10.0, http_post: Optional[HttpPost] = None):
+        if not isinstance(api_key, str) or not api_key.strip():
+            raise ValueError("TRMSanctions needs a non-empty api_key")
+        import base64
+        key = api_key.strip()
+        self._auth = "Basic " + base64.b64encode(f"{key}:{key}".encode()).decode()
+        self.timeout = float(timeout)
+        self._post = http_post or _urllib_post
+
+    def screen(self, address: str, chain_id: int) -> ScreeningResult:
+        try:
+            status, body = self._post(self.URL, {"Authorization": self._auth}, [{"address": address}], self.timeout)
+        except Exception as e:
+            return _fail(self.name, address, f"request failed ({type(e).__name__})")
+        if status not in (200, 201) or not isinstance(body, list):
+            return _fail(self.name, address, f"unexpected response (HTTP {status})", body)
+        match = [r for r in body if isinstance(r, Mapping) and str(r.get("address", "")).lower() == address.lower()]
+        if len(match) != 1 or not isinstance(match[0].get("isSanctioned"), bool):
+            return _fail(self.name, address, "no isSanctioned answer for this address", body)
+        hit = match[0]["isSanctioned"]
+        return ScreeningResult(self.name, address, sanctioned=hit, risk="severe" if hit else "none",
+                               reasons=["sanctions (TRM)"] if hit else [], raw=body)
 
 
 class CallableProvider:

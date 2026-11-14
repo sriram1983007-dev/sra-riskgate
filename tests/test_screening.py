@@ -173,3 +173,52 @@ def test_bad_screening_configuration_rejects(kw):
 def test_screen_addresses_never_raises():
     out = screen_addresses([prov(default={"risk": "low"})], [SENDER, PAYEE], 1)
     assert [type(r) for r in out] == [ScreeningResult, ScreeningResult] and all(r.ok for r in out)
+
+
+# ---- TRM Labs (1.5.0)
+class FakePost:
+    def __init__(self, resp):
+        self.resp, self.calls = resp, []
+
+    def __call__(self, url, headers, body, timeout):
+        self.calls.append((url, dict(headers), body))
+        if isinstance(self.resp, Exception):
+            raise self.resp
+        return self.resp(body) if callable(self.resp) else self.resp
+
+
+def test_trm_clean_and_sanctioned():
+    from sra_riskgate import TRMSanctions
+    post = FakePost(lambda body: (200, [{"address": body[0]["address"].upper(), "isSanctioned": body[0]["address"] == PAYEE}]))
+    p = TRMSanctions("key", http_post=post)
+    clean, hit = p.screen(SENDER, 8453), p.screen(PAYEE, 8453)
+    assert clean.ok and clean.sanctioned is False and clean.risk == "none"
+    assert hit.sanctioned is True and hit.risk == "severe"
+    url, headers, body = post.calls[0]
+    import base64
+    assert url == "https://api.trmlabs.com/public/v1/sanctions/screening" and body == [{"address": SENDER}]
+    assert headers["Authorization"] == "Basic " + base64.b64encode(b"key:key").decode()
+
+
+@pytest.mark.parametrize("resp", [(401, {"message": "unauthorized"}), (200, {"isSanctioned": False}), (200, []),
+                                  (200, [{"address": PAYEE}]), (200, [{"address": "0x" + "9" * 40, "isSanctioned": False}]),
+                                  (200, [{"address": PAYEE, "isSanctioned": "no"}]), ConnectionError()])
+def test_trm_anything_else_is_no_answer(resp):
+    from sra_riskgate import TRMSanctions
+    r = TRMSanctions("key", http_post=FakePost(resp)).screen(PAYEE, 8453)
+    assert not r.ok and r.error
+
+
+def test_trm_in_check_payment_fails_closed():
+    from sra_riskgate import TRMSanctions
+    down = TRMSanctions("key", http_post=FakePost((503, None)))
+    r = check_payment(**BASE, screening_providers=[down])
+    assert r.decision == ActionDecision.HOLD and "SCREENING_UNAVAILABLE" in r.flags
+    hit = TRMSanctions("key", http_post=FakePost(lambda b: (200, [{"address": b[0]["address"], "isSanctioned": True}])))
+    assert check_payment(**BASE, screening_providers=[hit]).decision == ActionDecision.REJECT
+
+
+def test_trm_needs_a_key():
+    from sra_riskgate import TRMSanctions
+    with pytest.raises(ValueError):
+        TRMSanctions("")

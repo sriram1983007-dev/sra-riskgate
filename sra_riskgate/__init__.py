@@ -11,7 +11,7 @@ from .account_code import check_account_code, delegate_from_code
 from .circle_wallets import CircleRequestBlocked, check_circle_request, guard_circle_wallets
 from .disputes import DisputeWindow, check_dispute_verdict, dispute_window, dispute_window_tool_result, with_dispute_window
 from .screening import (CallableProvider, ChainalysisSanctions, RangeRisk, ScreeningProvider, ScreeningResult,
-                        WebacyRisk, screen_addresses)
+                        TRMSanctions, WebacyRisk, screen_addresses)
 from .prompts import (DISPUTE_SYSTEM_PROMPT, PAYMENT_SYSTEM_PROMPT, dispute_messages, parse_dispute_verdict,
                       parse_payment_verdict, payment_messages)
 from .sanctions import SanctionsList, is_sanctioned
@@ -59,6 +59,7 @@ __all__ = [
     "ChainalysisSanctions",
     "RangeRisk",
     "WebacyRisk",
+    "TRMSanctions",
     "CallableProvider",
     "screen_addresses",
     "DisputeWindow",
@@ -68,4 +69,4 @@ __all__ = [
     "verify_gateway_balances",
     "SettlementCheck",
 ]
-__version__ = "1.4.0"
+__version__ = "1.5.0"

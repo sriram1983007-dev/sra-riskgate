@@ -118,15 +118,15 @@ check_transaction(tx, allowed_tokens=["USDC", "USDG"], known_recipients=MY_PAYEE
 | USDC | Ethereum, Base, Base Sepolia, Arc, Arc Testnet | checked | checked | held |
 | USDT | Ethereum | checked | not implemented by the token: held | not implemented by the token |
 | USDB (Bridge) | Ethereum, Base | checked | not implemented by the token: held | held |
-| USDG | Ethereum, Robinhood Chain (4663) | checked | not implemented by the token: held | held |
+| USDG | Ethereum, Robinhood Chain (4663) | checked | checked (1.6.0+) | held |
 
 Which token is being paid comes from the contract address, never from the request's own label. Approvals and
 permits are held for every listed token, enabled or not. `max_amount` and the depeg thresholds apply to the token
 being paid, so pass that token's own peg deviation, not USDC's. In a smart-account batch, payments to one payee are
 summed across tokens, so splitting a payment between USDC and USDT does not get it under the limit. Each contract,
-its decimals, and whether it implements EIP-3009 and permit were read on chain before release. The x402 hooks
-and Circle Gateway remain USDC-only: x402's EVM `exact` scheme signs EIP-3009, which only USDC implements
-here, and Gateway is a USDC product.
+its decimals, and whether it implements EIP-3009 and permit were read on chain before release (USDG's EIP-3009
+support was re-read on 2026-11-14 and is checked from 1.6.0; earlier releases held USDG x402 signatures). The x402
+hooks and Circle Gateway remain USDC-only: the hooks follow x402's USDC defaults, and Gateway is a USDC product.
 
 ### Your own stablecoin or chain (1.1.0+)
 

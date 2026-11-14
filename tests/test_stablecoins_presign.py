@@ -1,7 +1,7 @@
 """1.0.0: the checks before signing cover USDT, USDB and USDG as well as USDC, once enabled with allowed_tokens.
 
-On-chain facts these tests rely on (read 2026-11-06): only USDC implements EIP-3009 transferWithAuthorization;
-USDB and USDG implement EIP-2612 permit; USDT implements neither.
+On-chain facts these tests rely on (read 2026-11-06, USDG re-read 2026-11-14): USDC and USDG implement EIP-3009
+transferWithAuthorization; USDB implements EIP-2612 permit only; USDT implements neither.
 """
 import pytest
 from eth_abi import encode
@@ -23,6 +23,8 @@ USDC_BASE = USDC_ADDRESSES[8453]
 
 LISTED = [(sym, chain, addr) for sym, chains in STABLECOINS.items() for chain, (addr, _) in chains.items()]
 NON_USDC = [row for row in LISTED if row[0] != "USDC"]
+NO_EIP3009 = [row for row in NON_USDC if row[0] != "USDG"]
+USDG_ROWS = [row for row in LISTED if row[0] == "USDG"]
 
 
 def transfer_data(to, atomic):
@@ -168,7 +170,7 @@ def test_usdc_authorization_unchanged():
     assert r.decision == ActionDecision.APPROVE
 
 
-@pytest.mark.parametrize("sym,chain,addr", NON_USDC)
+@pytest.mark.parametrize("sym,chain,addr", NO_EIP3009)
 def test_eip3009_for_tokens_without_it_is_held(sym, chain, addr):
     r = check_authorization(typed(addr, chain), now=NOW, peg_deviation_pct=0.0, allowed_tokens=ALL)
     assert r.flags == ["UNSUPPORTED_SIGNATURE"] and "does not implement EIP-3009" in r.explanation
@@ -178,6 +180,20 @@ def test_eip3009_for_tokens_without_it_is_held(sym, chain, addr):
 def test_permits_are_held_for_listed_stablecoins(sym, chain, addr):
     r = check_authorization(typed(addr, chain, primary="Permit"), now=NOW)
     assert r.flags == ["TOKEN_APPROVAL", "UNLIMITED_APPROVAL"] and sym in r.explanation
+
+
+@pytest.mark.parametrize("sym,chain,addr", USDG_ROWS)
+def test_usdg_x402_authorization_is_checked(sym, chain, addr):
+    # 1.6.0: USDG implements EIP-3009 on Ethereum and Robinhood Chain, so its x402 signatures are checked.
+    r = check_authorization(typed(addr, chain, name="Global Dollar", version="1"), now=NOW, peg_deviation_pct=0.0,
+                            allowed_tokens=ALL)
+    assert r.decision == ActionDecision.APPROVE
+    # still off unless enabled, and still subject to every payment check
+    assert check_authorization(typed(addr, chain, name="Global Dollar", version="1"), now=NOW,
+                               peg_deviation_pct=0.0).flags == ["UNSUPPORTED_ASSET"]
+    big = check_authorization(typed(addr, chain, name="Global Dollar", version="1", value=str(5_000 * 10**6)), now=NOW,
+                              peg_deviation_pct=0.0, allowed_tokens=ALL, max_amount=1000)
+    assert big.decision == ActionDecision.HOLD
 
 
 def test_robinhood_gateway_lookalike_is_held_not_crashed():

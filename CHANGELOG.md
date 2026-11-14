@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0 — 2026-11-14
+
+### Fixed
+- USDG implements EIP-3009 on Ethereum and Robinhood Chain, so `check_authorization` now checks USDG x402
+  signatures (once `"USDG"` is in `allowed_tokens`) instead of holding them as signatures that "could never
+  settle". Re-read on chain on 2026-11-14: `TRANSFER_WITH_AUTHORIZATION_TYPEHASH()` is the EIP-3009 typehash,
+  `authorizationState()` answers, and `transferWithAuthorization()` with a bad signature reverts with
+  `InvalidSignature()`. The 2026-11-06 read that 1.0.0 relied on searched the proxy's implementation code for the
+  function and missed it. Holding them was safe but wrong. Reported by an external audit.
+
 ## 1.5.0 — 2026-11-14
 
 ### Added

@@ -131,17 +131,21 @@ class ChainalysisSanctions(_HttpProvider):
 
 
 class RangeRisk(_HttpProvider):
-    """Range Risk API v2 (``GET https://api.range.org/v2/risk/address``, header ``X-API-KEY``).
+    """Range Risk API v2 (``GET https://api.range.org/v2/risk/address``, ``Authorization: Bearer <key>``).
 
-    Uses Range's ``severity`` (none to severe) as the risk level, and treats any triggered attribution signal
-    whose name starts with ``sanctions`` as a sanctions match, whatever severity your Range workspace gives it."""
+    Uses Range's ``severity`` (none to severe) as the risk level. Any triggered attribution signal for a
+    government sanctions list is a sanctions match, whatever severity your Range workspace gives it: every
+    signal id containing ``sanction`` (``ofac-sanctioned``, ``uk-sanctioned``, ``eu-sanctioned``,
+    ``eu-sanction-ru``, ``france-sanctioned``, ``japan-sanctioned``, ``sanctioned``...) and
+    ``nbctf-terror-financing``. Exposure signals (indirect flows) are reported as reasons and count through
+    ``severity``, not as direct matches."""
 
     name = "range"
     BASE_URL = "https://api.range.org/v2/risk/address"
 
     def screen(self, address: str, chain_id: int) -> ScreeningResult:
         url = self.BASE_URL + "?" + urllib.parse.urlencode({"address": address})
-        out, err = self._call(address, url, {"X-API-KEY": self.api_key})
+        out, err = self._call(address, url, {"Authorization": f"Bearer {self.api_key}"})
         if err:
             return _fail(self.name, address, err)
         status, body = out
@@ -150,11 +154,19 @@ class RangeRisk(_HttpProvider):
             return _fail(self.name, address, f"unexpected response (HTTP {status})", body)
         triggered = ((body.get("attribution") or {}).get("triggered") or []) if isinstance(body.get("attribution"), Mapping) else []
         sanctions = [t for t in triggered if isinstance(t, Mapping) and t.get("result") is True
-                     and str(t.get("signal", "")).lower().startswith("sanction")]
+                     and _is_sanctions_signal(t.get("signal"))]
         reasons = [str(t.get("signal")) for t in triggered if isinstance(t, Mapping) and t.get("result") is True]
+        exposure = (body.get("exposure") or {}).get("triggered") if isinstance(body.get("exposure"), Mapping) else None
+        reasons += [f"exposure: {e.get('signal')} {e.get('percentage', '')}".strip() for e in exposure or []
+                    if isinstance(e, Mapping) and e.get("result") is True]
         behaviours = (body.get("behaviour") or {}).get("detected") if isinstance(body.get("behaviour"), Mapping) else None
         reasons += [str(b.get("behaviour")) for b in behaviours or [] if isinstance(b, Mapping) and not b.get("ignored")]
         return ScreeningResult(self.name, address, sanctioned=bool(sanctions), risk=sev, reasons=reasons, raw=body)
+
+
+def _is_sanctions_signal(signal: Any) -> bool:
+    s = str(signal or "").strip().lower()
+    return "sanction" in s or s == "nbctf-terror-financing"
 
 
 class WebacyRisk(_HttpProvider):
@@ -182,7 +194,7 @@ class WebacyRisk(_HttpProvider):
         info = (body.get("details") or {}).get("address_info") or {} if isinstance(body.get("details"), Mapping) else {}
         sanctioned = info.get("sanctioned") is True
         risk = "severe" if sanctioned else "high" if body["high"] > 0 else "medium" if body.get("medium", 0) > 0 else "low"
-        reasons = []
+        reasons = [f"overallRisk {body['overallRisk']}"] if isinstance(body.get("overallRisk"), (int, float)) else []
         for issue in body.get("issues") or []:
             for tag in (issue.get("tags") or []) if isinstance(issue, Mapping) else []:
                 if isinstance(tag, Mapping) and tag.get("name"):
@@ -193,26 +205,28 @@ class WebacyRisk(_HttpProvider):
 class TRMSanctions:
     """TRM Labs' free sanctions screening API (``POST https://api.trmlabs.com/public/v1/sanctions/screening``).
 
-    Sends ``[{"address": ...}]`` with HTTP Basic auth (the API key as both user name and password) and reads
-    ``isSanctioned`` for the matching address. TRM sends its full documentation and a key after a sign-up form;
+    Sends ``[{"address": ...}]`` and reads ``isSanctioned`` for the matching address. With an API key it uses
+    HTTP Basic auth (the key as both user name and password); without one (``TRMSanctions()``) it sends no
+    credentials, for TRM's free keyless access. If TRM requires a key and none is given, every check returns no
+    answer and the payment is held. TRM sends its full documentation and a key after a sign-up form;
     if your key or TRM's answer does not match this shape, every check returns no answer, which holds the payment
     (fail closed) rather than passing it. Sanctions only: the risk level is ``severe`` or ``none``."""
 
     name = "trm"
     URL = "https://api.trmlabs.com/public/v1/sanctions/screening"
 
-    def __init__(self, api_key: str, *, timeout: float = 10.0, http_post: Optional[HttpPost] = None):
-        if not isinstance(api_key, str) or not api_key.strip():
-            raise ValueError("TRMSanctions needs a non-empty api_key")
+    def __init__(self, api_key: Optional[str] = None, *, timeout: float = 10.0, http_post: Optional[HttpPost] = None):
+        if api_key is not None and (not isinstance(api_key, str) or not api_key.strip()):
+            raise ValueError("TRMSanctions api_key must be a non-empty string, or omitted for keyless access")
         import base64
-        key = api_key.strip()
-        self._auth = "Basic " + base64.b64encode(f"{key}:{key}".encode()).decode()
+        key = api_key.strip() if api_key else None
+        self._headers = {"Authorization": "Basic " + base64.b64encode(f"{key}:{key}".encode()).decode()} if key else {}
         self.timeout = float(timeout)
         self._post = http_post or _urllib_post
 
     def screen(self, address: str, chain_id: int) -> ScreeningResult:
         try:
-            status, body = self._post(self.URL, {"Authorization": self._auth}, [{"address": address}], self.timeout)
+            status, body = self._post(self.URL, dict(self._headers), [{"address": address}], self.timeout)
         except Exception as e:
             return _fail(self.name, address, f"request failed ({type(e).__name__})")
         if status not in (200, 201) or not isinstance(body, list):

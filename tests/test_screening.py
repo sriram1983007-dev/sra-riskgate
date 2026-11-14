@@ -57,7 +57,7 @@ def test_range_maps_severity_and_sanctions_signal():
     r = RangeRisk("k", http_get=http).screen(PAYEE, 8453)
     assert r.sanctioned is True and r.risk == "high" and "sanctions_ofac" in r.reasons and "smurfing" in r.reasons
     url, headers = http.calls[0]
-    assert url.startswith("https://api.range.org/v2/risk/address?address=0x") and headers["X-API-KEY"] == "k"
+    assert url.startswith("https://api.range.org/v2/risk/address?address=0x") and headers["Authorization"] == "Bearer k"
 
 
 def test_range_untriggered_sanctions_signal_is_not_a_match():
@@ -80,7 +80,7 @@ def webacy(high=0, medium=0, sanctioned=False):
 def test_webacy_levels_and_chain_mapping():
     http = FakeHttp(webacy(high=1))
     r = WebacyRisk("k", http_get=http).screen(PAYEE, 8453)
-    assert r.risk == "high" and r.sanctioned is False and r.reasons == ["HACK"]
+    assert r.risk == "high" and r.sanctioned is False and r.reasons == ["overallRisk 10", "HACK"]
     assert http.calls[0][0].endswith("?chain=base") and http.calls[0][1]["x-api-key"] == "k"
     assert WebacyRisk("k", http_get=FakeHttp(webacy(medium=2))).screen(PAYEE, 1).risk == "medium"
     assert WebacyRisk("k", http_get=FakeHttp(webacy())).screen(PAYEE, 1).risk == "low"
@@ -218,7 +218,46 @@ def test_trm_in_check_payment_fails_closed():
     assert check_payment(**BASE, screening_providers=[hit]).decision == ActionDecision.REJECT
 
 
-def test_trm_needs_a_key():
+def test_trm_key_is_optional_but_never_empty():
     from sra_riskgate import TRMSanctions
     with pytest.raises(ValueError):
-        TRMSanctions("")
+        TRMSanctions("  ")
+    post = FakePost(lambda body: (200, [{"address": body[0]["address"], "isSanctioned": False}]))
+    r = TRMSanctions(http_post=post).screen(PAYEE, 8453)
+    assert r.ok and r.sanctioned is False and "Authorization" not in post.calls[0][1]
+    assert not TRMSanctions(http_post=FakePost((401, None))).screen(PAYEE, 8453).ok   # key required: no answer
+
+
+# ---- Range sanctions signal ids, as listed in Range's risk data sources (1.6.1)
+@pytest.mark.parametrize("signal", ["ofac-sanctioned", "uk-sanctioned", "eu-sanctioned", "eu-sanction-ru",
+                                    "france-sanctioned", "japan-sanctioned", "sanctioned", "nbctf-terror-financing",
+                                    "sanctions_ofac", "OFAC-Sanctioned"])
+def test_range_every_sanctions_list_signal_is_a_match(signal):
+    body = {**RANGE_OK, "severity": "medium",
+            "attribution": {"triggered": [{"signal": signal, "severity": "high", "result": True}]}}
+    r = RangeRisk("k", http_get=FakeHttp((200, body))).screen(PAYEE, 8453)
+    assert r.sanctioned is True
+    assert check_payment(**BASE, screening_providers=[RangeRisk("k", http_get=FakeHttp((200, body)))]).decision \
+        == ActionDecision.REJECT
+
+
+@pytest.mark.parametrize("signal", ["fbi-fraud", "compliance-risk", "hack_funds", "scam"])
+def test_range_other_signals_are_not_sanctions_matches(signal):
+    body = {**RANGE_OK, "severity": "low",
+            "attribution": {"triggered": [{"signal": signal, "severity": "high", "result": True}]}}
+    r = RangeRisk("k", http_get=FakeHttp((200, body))).screen(PAYEE, 8453)
+    assert r.ok and r.sanctioned is False and signal in r.reasons
+
+
+def test_range_exposure_is_reported_and_counts_through_severity():
+    body = {**RANGE_OK, "severity": "high", "exposure": {"triggered": [
+        {"signal": "ofac-sanctioned", "mode": "percentage", "result": True, "percentage": "42.30%", "summary": "x"}]}}
+    r = RangeRisk("k", http_get=FakeHttp((200, body))).screen(PAYEE, 8453)
+    assert r.sanctioned is False and r.risk == "high" and "exposure: ofac-sanctioned 42.30%" in r.reasons
+    assert check_payment(**BASE, screening_providers=[RangeRisk("k", http_get=FakeHttp((200, body)))]).decision \
+        == ActionDecision.HOLD
+
+
+def test_webacy_reports_overall_risk():
+    r = WebacyRisk("k", http_get=FakeHttp(webacy(high=1))).screen(PAYEE, 8453)
+    assert r.reasons[0] == "overallRisk 10"

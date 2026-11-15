@@ -504,7 +504,7 @@ Still run `check_dispute_verdict` on the verdict.
 
 ## Screening providers: Chainalysis, Range, Webacy and your own (1.4.0+)
 
-TRM Labs is built in too, from 1.5.0.
+TRM Labs is built in from 1.5.0, Elliptic from 1.7.0.
 
 The bundled OFAC snapshot is an exact match against a dated list. Screening providers add fresher sanctions
 data and risk attribution (hacks, scams, mixers, exposure). Plug them into the same one-call check:
@@ -533,8 +533,8 @@ result = check_payment(
   `severity` as the risk level, and a triggered attribution signal for any government sanctions list, such as
   `ofac-sanctioned`, `uk-sanctioned`, `eu-sanctioned` or `eu-sanction-ru`, as a match; sanctions exposure raises
   the level to at least `high`) and `WebacyRisk` (Webacy address risk, level from its high- and medium-severity
-  issue counts, and at least `high` when `overallRisk` reaches `high_risk_score`, default 100). Bring your own
-  API keys.
+  issue counts, and at least `high` when `overallRisk` reaches `high_risk_score`, default 100) and `EllipticRisk`
+  (Elliptic Lens wallet screening, 1.7.0+; see below). Bring your own API keys.
 - **Anything else** (another vendor, an internal list) plugs in with `CallableProvider`:
 
 ```python
@@ -553,6 +553,31 @@ tests use response shapes from that documentation, not live calls. TRM shares it
 key after a sign-up form; `TRMSanctions` follows its published operation (`POST /public/v1/sanctions/screening`
 with `[{"address": ...}]`, answer `isSanctioned`), and any other answer holds the payment rather than passing it.
 `TRMSanctions()` without a key sends no credentials; if TRM requires one, every check holds.
+
+### Elliptic (1.7.0+)
+
+```python
+from sra_riskgate import EllipticRisk, check_payment
+
+elliptic = EllipticRisk(ELLIPTIC_KEY, ELLIPTIC_SECRET, high_risk_score=5, severe_risk_score=10)
+result = check_payment(chain_id=8453, sender=agent_wallet, recipient=payee, amount=12.5,
+                       screening_providers=[elliptic])
+```
+
+| Elliptic's answer | Level |
+| --- | --- |
+| A sanctions category on the wallet's own cluster labels (`cluster_entities`) | sanctions match: REJECT |
+| `risk_score` at or above `severe_risk_score` (default 10) | `severe`: REJECT |
+| `risk_score` at or above `high_risk_score` (default 5), or exposure to a sanctions or terrorism-financing category | `high`: HOLD |
+| Any other positive `risk_score` / 0 / `null` (no rule triggered) | `medium` / `low` / `none` |
+| `process_status` not `complete`, an error, any other HTTP status | no answer: HOLD |
+| HTTP 404 (address never seen on chain) | no answer: HOLD, or `none` with `unseen_is_clean=True` |
+
+Elliptic's score comes from the risk rules in your own Elliptic account, so set the two thresholds to match them.
+Requests use holistic screening (`asset` and `blockchain` both `holistic`), and are signed as Elliptic's API
+requires (`x-access-key`, `x-access-timestamp`, `x-access-sign`: Base64 HMAC-SHA256 of timestamp + method + path
++ body, keyed with the Base64-decoded secret). The adapter follows Elliptic's published OpenAPI specification
+(Wallet Analyses API 2.0.0) and has not yet been run against a live account.
 
 ## Prompts for the SRA-RiskGate-4B model (1.3.0+)
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.7.0 — 2026-11-15
+
+### Added
+- `EllipticRisk(api_key, api_secret)`: Elliptic Lens wallet screening as a screening provider
+  (`POST https://aml-api.elliptic.co/v2/wallet/synchronous`, holistic `wallet_exposure`, requests signed with
+  HMAC-SHA256 as Elliptic's API requires). A sanctions category on the wallet's own cluster labels rejects.
+  `risk_score` (0 to 10) sets the level: `severe` at or above `severe_risk_score` (default 10), `high` at or above
+  `high_risk_score` (default 5). Exposure to a sanctions or terrorism-financing category raises the level to at
+  least `high`. An analysis that is still running or ended in an error holds; so does an address Elliptic has
+  never seen (HTTP 404), unless `unseen_is_clean=True`. Follows Elliptic's published OpenAPI specification;
+  not yet validated against a live account.
+- The default POST helper sends a str or bytes body exactly as given, so signed bodies are not re-encoded.
+
 ## 1.6.2 — 2026-11-14
 
 ### Fixed

@@ -10,7 +10,7 @@ from .user_operation import check_user_operation, decode_account_calls
 from .account_code import check_account_code, delegate_from_code
 from .circle_wallets import CircleRequestBlocked, check_circle_request, guard_circle_wallets
 from .disputes import DisputeWindow, check_dispute_verdict, dispute_window, dispute_window_tool_result, with_dispute_window
-from .screening import (CallableProvider, ChainalysisSanctions, RangeRisk, ScreeningProvider, ScreeningResult,
+from .screening import (CallableProvider, ChainalysisSanctions, EllipticRisk, RangeRisk, ScreeningProvider, ScreeningResult,
                         TRMSanctions, WebacyRisk, screen_addresses)
 from .prompts import (DISPUTE_SYSTEM_PROMPT, PAYMENT_SYSTEM_PROMPT, dispute_messages, parse_dispute_verdict,
                       parse_payment_verdict, payment_messages)
@@ -59,6 +59,7 @@ __all__ = [
     "ChainalysisSanctions",
     "RangeRisk",
     "WebacyRisk",
+    "EllipticRisk",
     "TRMSanctions",
     "CallableProvider",
     "screen_addresses",
@@ -69,4 +70,4 @@ __all__ = [
     "verify_gateway_balances",
     "SettlementCheck",
 ]
-__version__ = "1.6.2"
+__version__ = "1.7.0"

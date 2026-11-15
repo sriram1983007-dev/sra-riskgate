@@ -12,8 +12,8 @@ then applies one policy to all of them:
   no answer is never treated as a clean answer.
 
 Built in: ``ChainalysisSanctions`` (Chainalysis's free sanctions API), ``TRMSanctions`` (TRM Labs' free sanctions
-API, 1.5.0+), ``RangeRisk`` (Range Risk API v2) and ``WebacyRisk`` (Webacy address risk). Anything else plugs in
-through ``CallableProvider``.
+API, 1.5.0+), ``RangeRisk`` (Range Risk API v2), ``WebacyRisk`` (Webacy address risk) and ``EllipticRisk``
+(Elliptic Lens wallet screening, 1.7.0+). Anything else plugs in through ``CallableProvider``.
 Screening sends the sender's and recipient's addresses to the provider; nothing else leaves your process.
 No API keys are bundled; you need an account with each provider.
 """
@@ -49,7 +49,8 @@ HttpPost = Callable[[str, Mapping[str, str], Any, float], "tuple[int, Any]"]
 
 
 def _urllib_post(url: str, headers: Mapping[str, str], body: Any, timeout: float) -> "tuple[int, Any]":
-    data = json.dumps(body).encode()
+    # A str or bytes body is sent exactly as given (Elliptic signs the body text); anything else is JSON-encoded.
+    data = body.encode() if isinstance(body, str) else body if isinstance(body, bytes) else json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method="POST", headers={
         "Accept": "application/json", "Content-Type": "application/json", "User-Agent": "sra-riskgate", **headers})
     try:
@@ -251,6 +252,131 @@ class TRMSanctions:
         hit = match[0]["isSanctioned"]
         return ScreeningResult(self.name, address, sanctioned=hit, risk="severe" if hit else "none",
                                reasons=["sanctions (TRM)"] if hit else [], raw=body)
+
+
+class EllipticRisk:
+    """Elliptic Lens wallet screening (``POST https://aml-api.elliptic.co/v2/wallet/synchronous``, 1.7.0+).
+
+    Sends ``{"subject": {"asset": "holistic", "blockchain": "holistic", "type": "address", "hash": address},
+    "type": "wallet_exposure"}``, signed as Elliptic's API requires: headers ``x-access-key``,
+    ``x-access-timestamp`` (milliseconds) and ``x-access-sign``, the Base64 HMAC-SHA256, keyed with the
+    Base64-decoded secret, of timestamp + ``POST`` + lowercased path + the exact body text.
+
+    Reading the answer:
+
+    - Only ``process_status: "complete"`` is an answer; ``running`` or ``error`` (with ``error.message``) is not.
+    - A label in ``cluster_entities`` whose category mentions sanctions (the wallet's own cluster, not its
+      exposure) is a sanctions match.
+    - ``risk_score`` (0 to 10, from the risk rules in your Elliptic account) sets the level: at or above
+      ``severe_risk_score`` (default 10) ``severe``, at or above ``high_risk_score`` (default 5) ``high``, any other
+      positive score ``medium``, 0 ``low``. ``null`` means no risk rule triggered: ``none``. Set the two
+      thresholds to match how your Elliptic rules score.
+    - Exposure to a sanctions or terrorism-financing category in ``evaluation_detail`` (funds from or to such an
+      entity) raises the level to at least ``high``, whatever the score. It is not a direct match, so it never
+      rejects on its own.
+    - HTTP 404 (Elliptic has never seen the address on chain) is no answer and holds the payment, unless
+      ``unseen_is_clean=True``. A brand-new payee address is the case to think about.
+
+    Holistic screening covers the chains Elliptic supports; for any other chain Elliptic answers with an error,
+    which holds the payment. The response shape follows Elliptic's published OpenAPI specification (Wallet
+    Analyses API 2.0.0); the tests use that shape, not live calls."""
+
+    name = "elliptic"
+    BASE_URL = "https://aml-api.elliptic.co"
+    PATH = "/v2/wallet/synchronous"
+
+    def __init__(self, api_key: str, api_secret: str, *, high_risk_score: float = 5.0,
+                 severe_risk_score: float = 10.0, unseen_is_clean: bool = False, timeout: float = 10.0,
+                 http_post: Optional[HttpPost] = None, clock: Optional[Callable[[], float]] = None):
+        import base64
+        import binascii
+        import time
+        for label, v in (("api_key", api_key), ("api_secret", api_secret)):
+            if not isinstance(v, str) or not v.strip():
+                raise ValueError(f"EllipticRisk needs a non-empty {label}")
+        try:
+            self._secret = base64.b64decode(api_secret.strip(), validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("EllipticRisk api_secret must be the Base64 secret Elliptic issued") from None
+        if not self._secret:
+            raise ValueError("EllipticRisk api_secret must be the Base64 secret Elliptic issued")
+        for label, v in (("high_risk_score", high_risk_score), ("severe_risk_score", severe_risk_score)):
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError(f"{label} must be a number")
+        if not 0 < high_risk_score <= severe_risk_score <= 10:
+            raise ValueError("need 0 < high_risk_score <= severe_risk_score <= 10")
+        if not isinstance(unseen_is_clean, bool):
+            raise ValueError("unseen_is_clean must be True or False")
+        self.api_key = api_key.strip()
+        self.high_risk_score, self.severe_risk_score = float(high_risk_score), float(severe_risk_score)
+        self.unseen_is_clean = unseen_is_clean
+        self.timeout = float(timeout)
+        self._post = http_post or _urllib_post
+        self._clock = clock or time.time
+
+    def _headers(self, body_text: str) -> dict:
+        import base64
+        import hashlib
+        import hmac
+        ts = str(int(self._clock() * 1000))
+        msg = ts + "POST" + self.PATH.lower() + body_text
+        sig = base64.b64encode(hmac.new(self._secret, msg.encode(), hashlib.sha256).digest()).decode()
+        return {"x-access-key": self.api_key, "x-access-sign": sig, "x-access-timestamp": ts}
+
+    def screen(self, address: str, chain_id: int) -> ScreeningResult:
+        body_text = json.dumps({"subject": {"asset": "holistic", "blockchain": "holistic", "type": "address",
+                                            "hash": address}, "type": "wallet_exposure"}, separators=(",", ":"))
+        try:
+            status, body = self._post(self.BASE_URL + self.PATH, self._headers(body_text), body_text, self.timeout)
+        except Exception as e:
+            return _fail(self.name, address, f"request failed ({type(e).__name__})")
+        if status == 404 and self.unseen_is_clean:
+            return ScreeningResult(self.name, address, sanctioned=False, risk="none",
+                                   reasons=["not seen on chain by Elliptic"], raw=body)
+        if status != 200 or not isinstance(body, Mapping):
+            return _fail(self.name, address, f"unexpected response (HTTP {status})", body)
+        if body.get("process_status") != "complete":
+            err = body.get("error")
+            why = err.get("message") if isinstance(err, Mapping) and err.get("message") else body.get("process_status")
+            return _fail(self.name, address, f"analysis not complete ({why})", body)
+        score = body.get("risk_score")
+        if score is not None and (isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 10):
+            return _fail(self.name, address, "risk_score is not a number from 0 to 10", body)
+        reasons, sanctioned = [], False
+        for e in body.get("cluster_entities") or []:
+            if not isinstance(e, Mapping):
+                continue
+            cat = str(e.get("category") or "")
+            if "sanction" in cat.lower():
+                sanctioned = True
+            if e.get("name") or cat:
+                reasons.append(f"{e.get('name') or 'unnamed'} ({cat or 'no category'})")
+        exposed = False
+        detail = body.get("evaluation_detail") if isinstance(body.get("evaluation_detail"), Mapping) else {}
+        for side in ("source", "destination"):
+            for rule in detail.get(side) or []:
+                if not isinstance(rule, Mapping):
+                    continue
+                for m in rule.get("matched_elements") or []:
+                    if not isinstance(m, Mapping):
+                        continue
+                    cat = str(m.get("category") or "")
+                    if any(w in cat.lower() for w in ("sanction", "terror")):
+                        exposed = True
+                    pct = m.get("contribution_percentage")
+                    reasons.append(f"{side} exposure: {cat or 'uncategorised'}"
+                                   + (f" {pct:g}%" if isinstance(pct, (int, float)) and not isinstance(pct, bool) else ""))
+        if score is None:
+            risk = "none"
+        else:
+            reasons.insert(0, f"risk_score {score:g}")
+            risk = ("severe" if score >= self.severe_risk_score else "high" if score >= self.high_risk_score
+                    else "medium" if score > 0 else "low")
+        if sanctioned:
+            risk = "severe"
+        elif exposed and RISK_ORDER[risk] < RISK_ORDER["high"]:
+            risk = "high"
+        return ScreeningResult(self.name, address, sanctioned=sanctioned, risk=risk, reasons=reasons, raw=body)
 
 
 class CallableProvider:

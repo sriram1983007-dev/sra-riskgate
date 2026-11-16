@@ -775,7 +775,7 @@ install the `[agentkit]` and `[x402]` extras in separate environments.
 
 ## MCP server
 
-For AI assistants and agents (Claude Desktop, Cursor and other MCP clients), [`sra-riskgate-mcp`](https://github.com/sriram1983007-dev/sra-riskgate-mcp) exposes these checks as MCP tools, including an x402 payment check and a model-backed review. It's listed in the official MCP Registry as `io.github.sriram1983007-dev/sra-riskgate-mcp`.
+For AI assistants and agents (Claude Desktop, Cursor and other MCP clients), [`sra-riskgate-mcp`](https://github.com/sriram1983007-dev/sra-riskgate-mcp) exposes these checks as MCP tools, including an x402 payment check and a model-backed review. It's listed in the official MCP Registry as `io.github.sriram1983007-dev/sra-riskgate-mcp`, and rated Grade A (trust score 98/100, November 2026) on [mcprush](https://mcprush.com/sriram1983007-dev/sra-riskgate-mcp).
 
 ## LangChain
 

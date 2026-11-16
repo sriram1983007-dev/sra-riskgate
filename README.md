@@ -579,6 +579,90 @@ requires (`x-access-key`, `x-access-timestamp`, `x-access-sign`: Base64 HMAC-SHA
 + body, keyed with the Base64-decoded secret). The adapter follows Elliptic's published OpenAPI specification
 (Wallet Analyses API 2.0.0) and has not yet been run against a live account.
 
+## Spending budgets and anomalies (1.8.0+)
+
+A per-payment ceiling does not stop an agent being drained by many small payments. `SpendGuard` keeps a local
+ledger of what each agent wallet has been approved to pay, and holds a payment that breaks a rolling budget or
+looks unlike the wallet's own history:
+
+```python
+from sra_riskgate import SpendGuard, SpendLedger, check_payment
+
+guard = SpendGuard(SpendLedger("~/.sra-riskgate/ledger.jsonl"),
+                   total_limit=200, per_payee_limit=50, window_seconds=86_400,
+                   max_payments_per_hour=60, amount_spike_factor=5)
+result = check_payment(chain_id=8453, sender=agent_wallet, recipient=payee, amount=12.5,
+                       spend_guard=guard, payment_id="invoice-4821")
+```
+
+| Flag (all HOLD) | When |
+| --- | --- |
+| `BUDGET_EXCEEDED` | The wallet's approved total in the window plus this payment exceeds `total_limit` |
+| `PAYEE_BUDGET_EXCEEDED` | The same, for this payee, against `per_payee_limit` |
+| `RATE_SPIKE` | The wallet already made `max_payments_per_hour` approved payments in the last hour |
+| `AMOUNT_SPIKE` | The amount is more than `amount_spike_factor` times the median of the wallet's last payments to this payee (after `spike_min_history`, default 5) |
+
+- An approved payment is recorded when it is approved, so payments checked one after another all count. If one
+  is never sent, `guard.release("invoice-4821")` removes it. Counting approvals errs on the safe side.
+- It works with every check: `check_transaction`, `check_authorization`, `check_circle_request` and
+  `check_user_operation` take `spend_guard=` too. A smart-account batch is counted once, as a whole, so splitting a
+  payment across calls or payees does not get under a budget.
+- Budgets are per sender wallet, across chains, and add up across stablecoins (all are pegged to the US dollar).
+- The ledger is a local JSON Lines file (or memory only). A corrupt or unreadable ledger holds every payment.
+  Two checks running at the same moment can both pass before either is recorded; for strict limits, check
+  payments from one process, one at a time.
+
+## Signed decision receipts (1.8.0+)
+
+A receipt is a tamper-evident record of a decision: what was decided, for which payment, under which policy,
+when, and by which version of the library. An auditor, a counterparty or your back office can check it later
+without trusting the log it came from.
+
+```python
+from sra_riskgate import ReceiptSigner, issue_receipt, verify_receipt
+
+signer = ReceiptSigner.hmac(secret_bytes)          # shared secret, standard library only
+receipt = issue_receipt(result, signer, payment={"chain_id": 8453, "sender": agent_wallet,
+                                                 "recipient": payee, "amount": 12.5}, policy=policy)
+verify_receipt(receipt, key=secret_bytes)          # True; change any field and it is False
+```
+
+With `ReceiptSigner.ethereum(private_key)` (`pip install "sra-riskgate[receipts]"`) the receipt carries an
+EIP-191 signature, so anyone can verify it with `verify_receipt(receipt, expected_signer="0x...")` and nobody
+without the key can make one. Use a key that holds no funds. A receipt proves what the gate decided; it does
+not prove the payment was sent (use `verify_settlement` for that).
+
+## One policy file for every check (1.8.0+)
+
+Keep the payment rules in one reviewed file instead of in each agent's code:
+
+```json
+{
+  "version": 1,
+  "name": "treasury-agents",
+  "max_amount": 250,
+  "allowed_tokens": ["USDC", "USDT"],
+  "known_recipients": ["0x..."],
+  "blocked_addresses": ["0x..."],
+  "screening": {"providers": [{"type": "chainalysis", "api_key_env": "CHAINALYSIS_API_KEY"}, {"type": "trm"}]},
+  "budgets": {"window_hours": 24, "total": 1000, "per_payee": 200},
+  "anomalies": {"max_payments_per_hour": 60, "amount_spike_factor": 5},
+  "ledger": "~/.sra-riskgate/ledger.jsonl"
+}
+```
+
+```python
+from sra_riskgate import load_policy
+
+policy = load_policy("payment-policy.json")      # .yaml / .yml too, with PyYAML
+result = check_payment(chain_id=8453, sender=agent_wallet, recipient=payee, amount=12.5, **policy.check_kwargs())
+```
+
+- API keys never go in the file: `api_key_env` names the environment variable that holds the key. A literal
+  `api_key` is refused, and a named variable that is unset is a configuration error.
+- Unknown keys are refused, so a typo (`max_ammount`) cannot silently drop a limit.
+- `policy.sha256` identifies the exact policy; `issue_receipt(..., policy=policy)` records it in the receipt.
+
 ## Prompts for the SRA-RiskGate-4B model (1.3.0+)
 
 The [model](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) only performs as benchmarked with the exact

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.8.0 — 2026-11-16
+
+### Added
+- **Spending budgets and anomalies.** `SpendGuard` with a local `SpendLedger` (JSON Lines file or memory), passed as
+  `spend_guard=` to `check_payment` and every other check. Rolling `total_limit` and `per_payee_limit` per sender
+  wallet (`BUDGET_EXCEEDED`, `PAYEE_BUDGET_EXCEEDED`), `max_payments_per_hour` (`RATE_SPIKE`) and
+  `amount_spike_factor` against the wallet's median payment to that payee (`AMOUNT_SPIKE`). All hold, never reject.
+  Approved payments are recorded on approval (`reserve_on_approve`); `payment_id` plus `guard.release()` removes
+  one that was never sent. A smart-account UserOperation is evaluated per call and then as a whole batch, and
+  recorded once. A corrupt ledger fails closed.
+- **Signed decision receipts.** `issue_receipt()` and `verify_receipt()`, signed with HMAC-SHA256
+  (`ReceiptSigner.hmac`) or an Ethereum key (`ReceiptSigner.ethereum`, EIP-191, verifiable by address; new
+  `receipts` extra). Receipts cover the decision, flags, explanation, payment, policy hash, time and library
+  version; any edit breaks them.
+- **Policy file.** `load_policy()` reads JSON or YAML (new `policy-yaml` extra) or a mapping, refuses unknown keys
+  and literal API keys, and `policy.check_kwargs()` returns the keyword arguments for every check, including
+  screening providers (keys from named environment variables) and a shared `SpendGuard`.
+
 ## 1.7.0 — 2026-11-15
 
 ### Added

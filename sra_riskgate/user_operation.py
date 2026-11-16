@@ -23,11 +23,13 @@ Supported ``callData`` (the account's execute function):
 """
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import Any, Iterable, Mapping, Optional
 
 from sra_riskgate.chains import NATIVE_USDC_CHAINS, NATIVE_USDC_DECIMALS, STABLECOIN_CHAINS, stablecoin_at
 from sra_riskgate.check import _verdict, check_payment
+from sra_riskgate.spend import SpendGuard, suppress_recording
 from sra_riskgate.counterparty import _normalise, parse_address_list
 from sra_riskgate.models import ActionDecision, RiskAssessment
 from sra_riskgate.transaction import _POLICY_KEYS, _hex, _int, _same, check_transaction, decode_erc20_transfer
@@ -291,47 +293,91 @@ def check_user_operation(
         if not calls:
             return _hold(["UNSUPPORTED_ACCOUNT_CALL"], "it makes no calls.")
 
-        n, approved, totals, counts, tokens = len(calls), [], {}, {}, {}
-        for i, call in enumerate(calls, 1):
-            where = f"call {i} of {n}" if n > 1 else "its call"
-            if _same(call["to"], account):
-                return _hold(["ACCOUNT_SELF_CALL"], f"{where} is to the account itself, which can change its "
-                                                    f"owners, modules or implementation.")
-            r = check_transaction({**call, "from": account, "chainId": chain_id}, **policy)
-            if r.decision != ActionDecision.APPROVE:
-                why = r.explanation.replace("SRA-RiskGate cannot approve this transaction: ", "")
-                return RiskAssessment(decision=r.decision, risk_score=r.risk_score, flags=r.flags,
-                                      explanation=f"In this UserOperation, {where}: {why}"[:500],
-                                      required_actions=r.required_actions)
-            approved.append(r)
-            paid = _stablecoin_paid(chain_id, call)
-            if paid:
-                payee, sym, amt = paid
-                totals[payee] = totals.get(payee, Decimal(0)) + amt
-                counts[payee] = counts.get(payee, 0) + 1
-                tokens.setdefault(payee, []).append(sym)
-
-        # Every listed stablecoin is a US-dollar token, so payments to one payee are summed across tokens:
-        # splitting a payment between USDC and USDT does not bring it under max_amount either.
-        for payee, total in totals.items():
-            if counts[payee] < 2:
-                continue
-            amount = float(total)
-            syms = list(dict.fromkeys(tokens[payee]))
-            unit = syms[0] if len(syms) == 1 else "in " + " and ".join(syms)
-            r = check_payment(chain_id=chain_id, sender=account, recipient=payee, amount=amount, token=syms[0],
-                              **policy)
-            if r.decision != ActionDecision.APPROVE:
-                return RiskAssessment(
-                    decision=r.decision, risk_score=r.risk_score, flags=sorted(set(r.flags) | {"BATCH_TOTAL"}),
-                    explanation=(f"Together, the {counts[payee]} payments to {payee} in this UserOperation total "
-                                 f"{format(total.normalize(), 'f')} {unit}: {r.explanation}")[:500],
-                    required_actions=r.required_actions)
-
-        flags = sorted({f for r in approved for f in r.flags})
-        return RiskAssessment(decision=ActionDecision.APPROVE, risk_score=max(r.risk_score for r in approved),
-                              flags=flags, explanation=f"All {n} call(s) in this UserOperation passed the checks.",
-                              required_actions=[])
+        guard = policy.get("spend_guard")
+        with suppress_recording():  # budgets are evaluated per call here, and counted once per batch below
+            verdict, totals, tokens = _check_calls(calls, account, chain_id, policy)
+        if verdict.decision != ActionDecision.APPROVE or not isinstance(guard, SpendGuard):
+            return verdict
+        return _batch_budget(verdict, totals, tokens, guard, account, chain_id, policy.get("payment_id"))
     except Exception as e:  # fail closed
         return _verdict(ActionDecision.HOLD, ["CHECK_FAILED"],
                         f"The UserOperation check failed ({type(e).__name__}), so it is held.", ["manual_review"])
+
+
+def _check_calls(calls: list, account: str, chain_id: int, policy: dict):
+    """Check every call, then each payee's batch total. Returns ``(verdict, totals, tokens)``."""
+    n, approved, totals, counts, tokens = len(calls), [], {}, {}, {}
+    for i, call in enumerate(calls, 1):
+        where = f"call {i} of {n}" if n > 1 else "its call"
+        if _same(call["to"], account):
+            return _hold(["ACCOUNT_SELF_CALL"], f"{where} is to the account itself, which can change its "
+                                                f"owners, modules or implementation."), {}, {}
+        r = check_transaction({**call, "from": account, "chainId": chain_id}, **policy)
+        if r.decision != ActionDecision.APPROVE:
+            why = r.explanation.replace("SRA-RiskGate cannot approve this transaction: ", "")
+            return RiskAssessment(decision=r.decision, risk_score=r.risk_score, flags=r.flags,
+                                  explanation=f"In this UserOperation, {where}: {why}"[:500],
+                                  required_actions=r.required_actions), {}, {}
+        approved.append(r)
+        paid = _stablecoin_paid(chain_id, call)
+        if paid:
+            payee, sym, amt = paid
+            totals[payee] = totals.get(payee, Decimal(0)) + amt
+            counts[payee] = counts.get(payee, 0) + 1
+            tokens.setdefault(payee, []).append(sym)
+
+    # Every listed stablecoin is a US-dollar token, so payments to one payee are summed across tokens:
+    # splitting a payment between USDC and USDT does not bring it under max_amount either.
+    for payee, total in totals.items():
+        if counts[payee] < 2:
+            continue
+        amount = float(total)
+        syms = list(dict.fromkeys(tokens[payee]))
+        unit = syms[0] if len(syms) == 1 else "in " + " and ".join(syms)
+        r = check_payment(chain_id=chain_id, sender=account, recipient=payee, amount=amount, token=syms[0],
+                          **policy)
+        if r.decision != ActionDecision.APPROVE:
+            return RiskAssessment(
+                decision=r.decision, risk_score=r.risk_score, flags=sorted(set(r.flags) | {"BATCH_TOTAL"}),
+                explanation=(f"Together, the {counts[payee]} payments to {payee} in this UserOperation total "
+                             f"{format(total.normalize(), 'f')} {unit}: {r.explanation}")[:500],
+                required_actions=r.required_actions), {}, {}
+
+    flags = sorted({f for r in approved for f in r.flags})
+    verdict = RiskAssessment(decision=ActionDecision.APPROVE, risk_score=max(r.risk_score for r in approved),
+                             flags=flags, explanation=f"All {n} call(s) in this UserOperation passed the checks.",
+                             required_actions=[])
+    return verdict, totals, tokens
+
+
+def _batch_budget(verdict: RiskAssessment, totals: dict, tokens: dict, guard: SpendGuard, account: str,
+                  chain_id: int, payment_id: Optional[str]) -> RiskAssessment:
+    """Count the whole batch against the budgets, payee by payee, so several payees together cannot exceed it."""
+    batch_id = payment_id or f"userop-{uuid.uuid4().hex}"
+    recorded = False
+    try:
+        for payee, total in totals.items():
+            broken = guard.evaluate(sender=account, recipient=payee, amount=float(total))
+            if broken:
+                if recorded:
+                    guard.release(batch_id)
+                return RiskAssessment(
+                    decision=ActionDecision.HOLD, risk_score=0.65,
+                    flags=sorted({f for f, _ in broken} | {"BATCH_TOTAL"}),
+                    explanation=(f"Counting this UserOperation's payments together, the payment of "
+                                 f"{format(total.normalize(), 'f')} to {payee}: " + " ".join(w for _, w in broken))[:500],
+                    required_actions=["manual_review"])
+            guard.record(chain_id=chain_id, sender=account, recipient=payee, amount=float(total),
+                         token=tokens[payee][0], payment_id=batch_id)
+            recorded = True
+        if not guard.reserve_on_approve and recorded:
+            guard.release(batch_id)
+        return verdict
+    except Exception as e:
+        if recorded:
+            try:
+                guard.release(batch_id)
+            except Exception:
+                pass
+        return _hold(["CHECK_FAILED"], f"the spending budget could not be checked ({type(e).__name__}).")
+

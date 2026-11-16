@@ -180,3 +180,75 @@ def test_in_check_payment():
     down, _ = provider((503, None))
     r = check_payment(**BASE, screening_providers=[down])
     assert r.decision == ActionDecision.HOLD and "SCREENING_UNAVAILABLE" in r.flags
+
+
+# ---------------------------------------------------------------- 1.8.1: Audit #18 (sanctions signals)
+
+def _sanctioned_entity_response(**over):
+    """Shaped like an OFAC-listed exchange in Elliptic's schema: category 'Exchange', not 'Sanctions'."""
+    body = analysis(None, entities=[("Microvault", "Exchange")])
+    body["cluster_entities"][0].update({"entity_id": "e-1", "is_after_sanction_date": True})
+    body.update(over)
+    return body
+
+
+def test_is_after_sanction_date_marks_the_wallet_sanctioned():
+    p, _ = provider((200, _sanctioned_entity_response()))
+    r = p.screen(PAYEE, 8453)
+    assert r.sanctioned is True and r.risk == "severe" and any("sanctioned entity" in x for x in r.reasons)
+    body = _sanctioned_entity_response()
+    body["cluster_entities"][0]["is_after_sanction_date"] = False   # activity predates listing: still listed
+    p, _ = provider((200, body))
+    assert p.screen(PAYEE, 8453).sanctioned is True
+
+
+def _with_trigger(entity_id, name, sanctioned=True):
+    body = analysis(None, entities=[("Microvault", "Exchange")])
+    body["cluster_entities"][0]["entity_id"] = "e-1"
+    body["evaluation_detail"]["source"] = [{"rule_id": "r", "rule_name": "Exposure", "risk_score": None,
+        "matched_elements": [{"category": "Exchange", "contribution_percentage": 100, "contributions": [
+            {"entity": name, "entity_id": entity_id, "contribution_percentage": 100,
+             "risk_triggers": {"name": name, "category": "Exchange", "is_sanctioned": sanctioned,
+                               "country": ["RU"]}}]}]}]
+    return body
+
+
+def test_risk_trigger_on_own_entity_is_a_match():
+    p, _ = provider((200, _with_trigger("e-1", "Microvault")))
+    r = p.screen(PAYEE, 8453)
+    assert r.sanctioned is True and r.risk == "severe"
+
+
+def test_risk_trigger_on_another_entity_is_exposure_that_holds():
+    p, _ = provider((200, _with_trigger("e-9", "Garantex")))
+    r = p.screen(PAYEE, 8453)
+    assert r.sanctioned is False and r.risk == "high" and any("Garantex is sanctioned" in x for x in r.reasons)
+
+
+def test_unsanctioned_trigger_changes_nothing():
+    p, _ = provider((200, _with_trigger("e-9", "Coinbase", sanctioned=False)))
+    assert p.screen(PAYEE, 8453).risk == "none"
+
+
+@pytest.mark.parametrize("details", [{"sanctions": ["OFAC SDN"]}, [{"sanctions": [{"list": "OFAC"}]}],
+                                     {"sanctions": True}, {"is_sanctioned": True}])
+def test_entity_details_listing_sanctions_is_a_match(details):
+    p, _ = provider((200, {**analysis(None), "entity_details": details}))
+    assert p.screen(PAYEE, 8453).sanctioned is True
+
+
+@pytest.mark.parametrize("details", [{"sanctions": []}, {"sanctions": None}, [], "x", None])
+def test_entity_details_without_sanctions_changes_nothing(details):
+    p, _ = provider((200, {**analysis(None), "entity_details": details}))
+    assert p.screen(PAYEE, 8453).sanctioned is False
+
+
+def test_a_sanctioned_entity_response_never_approves_in_check_payment():
+    def answer(body):
+        return (200, _sanctioned_entity_response() if body["subject"]["hash"] == PAYEE else analysis(None))
+    p, _ = provider(answer)
+    r = check_payment(**BASE, screening_providers=[p])
+    assert r.decision == ActionDecision.REJECT and "PROVIDER_SANCTIONS_MATCH" in r.flags
+    p, _ = provider(lambda b: (200, _with_trigger("e-9", "Garantex")) if b["subject"]["hash"] == PAYEE
+                    else (200, analysis(None)))
+    assert check_payment(**BASE, screening_providers=[p]).decision == ActionDecision.HOLD

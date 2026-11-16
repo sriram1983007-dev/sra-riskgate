@@ -30,6 +30,14 @@ def test_hmac_receipt_round_trip_and_contents():
     assert rc["issued_at"] == "2026-11-16T18:00:05Z" and rc["library"].startswith("sra-riskgate 1.8")
     assert rc["payment"] == PAYMENT and len(rc["id"]) == 32 and rc["policy_sha256"] is None
     json.dumps(rc)  # plain JSON
+    assert type(rc["decision"]) is str  # not the ActionDecision enum
+
+
+def test_receipts_for_a_mapping_with_an_enum_decision():
+    from sra_riskgate import ActionDecision
+    rc = issue_receipt({"decision": ActionDecision.HOLD, "risk_score": 0.65, "flags": [], "explanation": ""},
+                       ReceiptSigner.hmac(KEY))
+    assert type(rc["decision"]) is str and rc["decision"] == "hold" and verify_receipt(rc, key=KEY)
 
 
 @pytest.mark.parametrize("field,value", [("decision", "reject"), ("risk_score", 0.0), ("flags", ["X"]),

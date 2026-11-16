@@ -280,15 +280,26 @@ def test_range_non_sanctions_exposure_keeps_range_severity():
     assert RangeRisk("k", http_get=FakeHttp((200, body))).screen(PAYEE, 8453).risk == "low"
 
 
-def test_webacy_overall_risk_score_raises_risk():
-    hi = (200, {"overallRisk": 100, "high": 0, "medium": 0, "count": 0, "issues": [], "details": {"address_info": {}}})
-    mid = (200, {"overallRisk": 95, "high": 0, "medium": 0, "count": 0, "issues": [], "details": {"address_info": {}}})
-    assert WebacyRisk("k", http_get=FakeHttp(hi)).screen(PAYEE, 1).risk == "high"
-    assert WebacyRisk("k", http_get=FakeHttp(mid)).screen(PAYEE, 1).risk == "low"
-    assert WebacyRisk("k", http_get=FakeHttp(mid), high_risk_score=90).screen(PAYEE, 1).risk == "high"
-    for bad in (0, -5, True, "90"):
+def _webacy(score, high=0, medium=0):
+    return (200, {"overallRisk": score, "high": high, "medium": medium, "count": 0, "issues": [],
+                  "details": {"address_info": {}}})
+
+
+@pytest.mark.parametrize("score,risk", [(0, "low"), (23, "low"), (23.1, "medium"), (50, "medium"),
+                                        (50.1, "high"), (95, "high"), (100, "high")])
+def test_webacy_overall_risk_uses_webacys_documented_bands(score, risk):
+    """Webacy: 0-23 Low, 23.1-50 Medium, 50.1-100 High (docs.webacy.com/reference/risk-levels). 1.8.1+."""
+    assert WebacyRisk("k", http_get=FakeHttp(_webacy(score))).screen(PAYEE, 1).risk == risk
+
+
+def test_webacy_thresholds_are_configurable_and_issue_counts_still_count():
+    assert WebacyRisk("k", http_get=FakeHttp(_webacy(95)), high_risk_score=96).screen(PAYEE, 1).risk == "medium"
+    assert WebacyRisk("k", http_get=FakeHttp(_webacy(10, high=1))).screen(PAYEE, 1).risk == "high"
+    assert WebacyRisk("k", http_get=FakeHttp(_webacy(10, medium=1))).screen(PAYEE, 1).risk == "medium"
+    for kw in (dict(high_risk_score=-5), dict(high_risk_score=101), dict(high_risk_score=True),
+               dict(high_risk_score="90"), dict(medium_risk_score=60, high_risk_score=50)):
         with pytest.raises(ValueError):
-            WebacyRisk("k", high_risk_score=bad)
+            WebacyRisk("k", **kw)
 
 
 @pytest.mark.parametrize("tokens", [{"USDC": True}, {"USDC": 1, "USDT": 1}, b"USDC"])

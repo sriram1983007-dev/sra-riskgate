@@ -178,19 +178,24 @@ class WebacyRisk(_HttpProvider):
 
     A ``sanctioned`` flag in ``details.address_info`` is a sanctions match. Otherwise the risk level comes from
     Webacy's own issue counts: any high-severity issue gives ``high``, any medium one ``medium``, else ``low``.
-    An ``overallRisk`` score at or above ``high_risk_score`` (default 100, the value Webacy's documentation calls
-    high risk) also gives at least ``high``; lower it if you use Webacy's own score bands (1.6.2+).
+    ``overallRisk`` (0 to 100) also sets a floor, using Webacy's documented bands: above ``high_risk_score``
+    (default 50, Webacy's "High Risk" is 50.1 to 100) gives at least ``high``, above ``medium_risk_score``
+    (default 23, Webacy's "Medium Risk" is 23.1 to 50) at least ``medium``. Before 1.8.1 the default was 100.
     A 202 (analysis still running) is treated as no answer."""
 
     name = "webacy"
     BASE_URL = "https://api.webacy.com/addresses/"
     CHAINS = {1: "eth", 8453: "base", 137: "pol", 42161: "arb", 56: "bsc", 10: "opt"}
 
-    def __init__(self, api_key: str, *, high_risk_score: float = 100, **kw):
+    def __init__(self, api_key: str, *, high_risk_score: float = 50, medium_risk_score: float = 23, **kw):
         super().__init__(api_key, **kw)
-        if isinstance(high_risk_score, bool) or not isinstance(high_risk_score, (int, float)) or high_risk_score <= 0:
-            raise ValueError("high_risk_score must be a positive number")
+        for label, v in (("high_risk_score", high_risk_score), ("medium_risk_score", medium_risk_score)):
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 100:
+                raise ValueError(f"{label} must be a number from 0 to 100")
+        if medium_risk_score > high_risk_score:
+            raise ValueError("medium_risk_score must not be above high_risk_score")
         self.high_risk_score = float(high_risk_score)
+        self.medium_risk_score = float(medium_risk_score)
 
     def screen(self, address: str, chain_id: int) -> ScreeningResult:
         chain = self.CHAINS.get(chain_id)
@@ -206,9 +211,11 @@ class WebacyRisk(_HttpProvider):
         info = (body.get("details") or {}).get("address_info") or {} if isinstance(body.get("details"), Mapping) else {}
         sanctioned = info.get("sanctioned") is True
         score = body.get("overallRisk")
-        scored_high = isinstance(score, (int, float)) and not isinstance(score, bool) and score >= self.high_risk_score
+        scored = isinstance(score, (int, float)) and not isinstance(score, bool)
+        scored_high = scored and score > self.high_risk_score
+        scored_medium = scored and score > self.medium_risk_score
         risk = ("severe" if sanctioned else "high" if body["high"] > 0 or scored_high
-                else "medium" if body.get("medium", 0) > 0 else "low")
+                else "medium" if body.get("medium", 0) > 0 or scored_medium else "low")
         reasons = [f"overallRisk {body['overallRisk']}"] if isinstance(body.get("overallRisk"), (int, float)) else []
         for issue in body.get("issues") or []:
             for tag in (issue.get("tags") or []) if isinstance(issue, Mapping) else []:
@@ -265,14 +272,17 @@ class EllipticRisk:
     Reading the answer:
 
     - Only ``process_status: "complete"`` is an answer; ``running`` or ``error`` (with ``error.message``) is not.
-    - A label in ``cluster_entities`` whose category mentions sanctions (the wallet's own cluster, not its
-      exposure) is a sanctions match.
+    - A sanctions match (the wallet's own cluster, not its exposure): a label in ``cluster_entities`` whose category
+      mentions sanctions, or that carries ``is_after_sanction_date`` (set only for sanctioned entities); a matched
+      element whose ``risk_triggers.is_sanctioned`` is true for the wallet's own entity; or, if present,
+      ``entity_details`` listing sanctions (1.8.1+).
     - ``risk_score`` (0 to 10, from the risk rules in your Elliptic account) sets the level: at or above
       ``severe_risk_score`` (default 10) ``severe``, at or above ``high_risk_score`` (default 5) ``high``, any other
       positive score ``medium``, 0 ``low``. ``null`` means no risk rule triggered: ``none``. Set the two
       thresholds to match how your Elliptic rules score.
-    - Exposure to a sanctions or terrorism-financing category in ``evaluation_detail`` (funds from or to such an
-      entity) raises the level to at least ``high``, whatever the score. It is not a direct match, so it never
+    - Exposure to a sanctions or terrorism-financing category in ``evaluation_detail``, or to any entity whose
+      ``risk_triggers.is_sanctioned`` is true (funds from or to it), raises the level to at least ``high``, whatever
+      the score. It is not a direct match, so it never
       rejects on its own.
     - HTTP 404 (Elliptic has never seen the address on chain) is no answer and holds the payment, unless
       ``unseen_is_clean=True``. A brand-new payee address is the case to think about.
@@ -343,14 +353,26 @@ class EllipticRisk:
         if score is not None and (isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 10):
             return _fail(self.name, address, "risk_score is not a number from 0 to 10", body)
         reasons, sanctioned = [], False
+        own_ids, own_names = set(), set()
         for e in body.get("cluster_entities") or []:
             if not isinstance(e, Mapping):
                 continue
             cat = str(e.get("category") or "")
+            if e.get("entity_id"):
+                own_ids.add(str(e["entity_id"]))
+            if e.get("name"):
+                own_names.add(str(e["name"]).strip().lower())
             if "sanction" in cat.lower():
                 sanctioned = True
+            # Elliptic sets is_after_sanction_date only for sanctioned entities (1.8.1+)
+            if isinstance(e.get("is_after_sanction_date"), bool):
+                sanctioned = True
+                reasons.append(f"{e.get('name') or 'unnamed'} is a sanctioned entity")
             if e.get("name") or cat:
                 reasons.append(f"{e.get('name') or 'unnamed'} ({cat or 'no category'})")
+        if _elliptic_entity_details_sanctioned(body.get("entity_details")):
+            sanctioned = True
+            reasons.append("entity_details lists sanctions")
         exposed = False
         detail = body.get("evaluation_detail") if isinstance(body.get("evaluation_detail"), Mapping) else {}
         for side in ("source", "destination"):
@@ -363,6 +385,20 @@ class EllipticRisk:
                     cat = str(m.get("category") or "")
                     if any(w in cat.lower() for w in ("sanction", "terror")):
                         exposed = True
+                    # risk_triggers.is_sanctioned on a contributing entity (1.8.1+): exposure, or a direct match
+                    # when that entity is the screened wallet's own cluster
+                    for c in m.get("contributions") or []:
+                        if not isinstance(c, Mapping):
+                            continue
+                        rt = c.get("risk_triggers")
+                        if isinstance(rt, Mapping) and rt.get("is_sanctioned") is True:
+                            exposed = True
+                            who = str(rt.get("name") or c.get("entity") or "an entity")
+                            mine = (c.get("entity_id") is not None and str(c["entity_id"]) in own_ids) or \
+                                who.strip().lower() in own_names
+                            if mine:
+                                sanctioned = True
+                            reasons.append(f"{side}: {who} is sanctioned" + (" (this wallet's own entity)" if mine else ""))
                     pct = m.get("contribution_percentage")
                     reasons.append(f"{side} exposure: {cat or 'uncategorised'}"
                                    + (f" {pct:g}%" if isinstance(pct, (int, float)) and not isinstance(pct, bool) else ""))
@@ -377,6 +413,19 @@ class EllipticRisk:
         elif exposed and RISK_ORDER[risk] < RISK_ORDER["high"]:
             risk = "high"
         return ScreeningResult(self.name, address, sanctioned=sanctioned, risk=risk, reasons=reasons, raw=body)
+
+
+def _elliptic_entity_details_sanctioned(details: Any) -> bool:
+    """True if an ``entity_details`` object (or list of them) lists sanctions. Not in Elliptic's published schema;
+    checked defensively because some responses carry it."""
+    items = details if isinstance(details, list) else [details] if isinstance(details, Mapping) else []
+    for d in items:
+        if not isinstance(d, Mapping):
+            continue
+        s = d.get("sanctions")
+        if s is True or (isinstance(s, (list, Mapping)) and len(s) > 0) or d.get("is_sanctioned") is True:
+            return True
+    return False
 
 
 class CallableProvider:

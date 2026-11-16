@@ -55,10 +55,10 @@ def _plain(v: Any) -> Any:
         if not math.isfinite(v):
             raise ValueError("receipt numbers must be finite")
         return v
+    if hasattr(v, "value") and isinstance(getattr(v, "value"), str):  # enums, including str enums
+        return v.value
     if v is None or isinstance(v, (str, int, bool)):
         return v
-    if hasattr(v, "value") and isinstance(getattr(v, "value"), str):  # enums
-        return v.value
     raise ValueError(f"cannot put a {type(v).__name__} in a receipt")
 
 
@@ -109,7 +109,7 @@ def issue_receipt(result: Any, signer: ReceiptSigner, *, payment: Optional[Mappi
     """A signed receipt for a ``RiskAssessment`` (or any object or mapping with the same fields)."""
     if not isinstance(signer, ReceiptSigner):
         raise ValueError("signer must be a ReceiptSigner")
-    r = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+    r = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
     from sra_riskgate import __version__
     body = {
         "v": 1,

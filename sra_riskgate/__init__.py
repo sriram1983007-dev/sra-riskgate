@@ -16,6 +16,9 @@ from .prompts import (DISPUTE_SYSTEM_PROMPT, PAYMENT_SYSTEM_PROMPT, dispute_mess
                       parse_payment_verdict, payment_messages)
 from .sanctions import SanctionsList, is_sanctioned
 from .settlement import SettlementCheck, verify_gateway_balances, verify_settlement
+from .spend import SpendGuard, SpendLedger
+from .receipts import ReceiptSigner, issue_receipt, verify_receipt
+from .policy import Policy, load_policy
 
 __all__ = [
     "RiskGate",
@@ -69,5 +72,12 @@ __all__ = [
     "verify_settlement",
     "verify_gateway_balances",
     "SettlementCheck",
+    "SpendGuard",
+    "SpendLedger",
+    "ReceiptSigner",
+    "issue_receipt",
+    "verify_receipt",
+    "Policy",
+    "load_policy",
 ]
-__version__ = "1.7.0"
+__version__ = "1.8.0"

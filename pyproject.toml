@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sra-riskgate"
-version = "1.7.0"
+version = "1.8.0"
 description = "Fail-closed checks for AI-agent stablecoin payments (USDC, USDT, USDB, USDG): OFAC SDN match, payee policy, limits, depeg, unsafe token approvals in transactions and x402 signatures, post-settlement receipt verification, and dispute-window verdicts"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -45,6 +45,8 @@ Benchmark = "https://huggingface.co/datasets/sriram1983007/sra-stablecoin-risk-b
 agentkit = ["coinbase-agentkit>=0.7.4,<0.8", "solana>=0.36.6,<0.37"]
 x402 = ["x402[evm]>=2.25,<3"]
 circle = ["circle-developer-controlled-wallets>=9"]
+receipts = ["eth-account>=0.10"]
+policy-yaml = ["pyyaml>=6"]
 test = ["pytest>=7", "eth-abi>=5"]
 
 [tool.setuptools.packages.find]

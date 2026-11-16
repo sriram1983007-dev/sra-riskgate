@@ -533,7 +533,7 @@ result = check_payment(
   `severity` as the risk level, and a triggered attribution signal for any government sanctions list, such as
   `ofac-sanctioned`, `uk-sanctioned`, `eu-sanctioned` or `eu-sanction-ru`, as a match; sanctions exposure raises
   the level to at least `high`) and `WebacyRisk` (Webacy address risk, level from its high- and medium-severity
-  issue counts, and at least `high` when `overallRisk` reaches `high_risk_score`, default 100) and `EllipticRisk`
+  issue counts, and Webacy's own `overallRisk` bands: above 50 at least `high`, above 23 at least `medium`, 1.8.1+) and `EllipticRisk`
   (Elliptic Lens wallet screening, 1.7.0+; see below). Bring your own API keys.
 - **Anything else** (another vendor, an internal list) plugs in with `CallableProvider`:
 
@@ -566,9 +566,9 @@ result = check_payment(chain_id=8453, sender=agent_wallet, recipient=payee, amou
 
 | Elliptic's answer | Level |
 | --- | --- |
-| A sanctions category on the wallet's own cluster labels (`cluster_entities`) | sanctions match: REJECT |
+| The wallet's own cluster is sanctioned: a sanctions category or `is_after_sanction_date` on its `cluster_entities` labels, `risk_triggers.is_sanctioned` on its own entity, or `entity_details` listing sanctions (1.8.1+) | sanctions match: REJECT |
 | `risk_score` at or above `severe_risk_score` (default 10) | `severe`: REJECT |
-| `risk_score` at or above `high_risk_score` (default 5), or exposure to a sanctions or terrorism-financing category | `high`: HOLD |
+| `risk_score` at or above `high_risk_score` (default 5), or exposure to a sanctions or terrorism-financing category, or to any entity with `risk_triggers.is_sanctioned` | `high`: HOLD |
 | Any other positive `risk_score` / 0 / `null` (no rule triggered) | `medium` / `low` / `none` |
 | `process_status` not `complete`, an error, any other HTTP status | no answer: HOLD |
 | HTTP 404 (address never seen on chain) | no answer: HOLD, or `none` with `unseen_is_clean=True` |

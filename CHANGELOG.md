@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.8.1 — 2026-11-16
+
+### Fixed (Audit #18)
+- **Elliptic: sanctions signals that were ignored.** A sanctioned entity whose category is not "Sanctions" (an
+  OFAC-listed exchange labelled "Exchange", for example) could pass. A sanctions match now also comes from
+  `is_after_sanction_date` on the wallet's own `cluster_entities` labels (Elliptic sets it only for sanctioned
+  entities), from `risk_triggers.is_sanctioned` on the wallet's own entity in `evaluation_detail`, and, when present,
+  from `entity_details` listing sanctions (not in Elliptic's published schema; read defensively). Any other entity
+  with `risk_triggers.is_sanctioned` is sanctions exposure and holds. Still not validated against a live account.
+- **Webacy: the `overallRisk` default followed the wrong scale.** Webacy documents 0-23 Low, 23.1-50 Medium and
+  50.1-100 High; the default `high_risk_score` was 100, so a score of 95 counted as low. Now above 50 gives at least
+  `high` and above 23 at least `medium` (`medium_risk_score`, new). This holds more payments than 1.8.0 did.
+- Receipts: `decision` is a plain string in the receipt, not the `ActionDecision` enum (the signature and JSON were
+  already correct).
+
 ## 1.8.0 — 2026-11-16
 
 ### Added
@@ -156,6 +171,8 @@ All reported by an external audit.
 ### Unchanged
 - The x402 hooks and Circle Gateway checks remain USDC-only: x402's EVM `exact` scheme signs EIP-3009, which only
   USDC implements among the listed tokens, and Gateway is a USDC product.
+  *(Corrected in 1.6.0: USDG also implements EIP-3009 on Ethereum and Robinhood Chain, and its signatures are
+  checked from 1.6.0.)*
 
 ## 0.20.0 — 2026-11-04
 

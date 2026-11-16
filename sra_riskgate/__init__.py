@@ -80,4 +80,4 @@ __all__ = [
     "Policy",
     "load_policy",
 ]
-__version__ = "1.8.0"
+__version__ = "1.8.1"

@@ -189,7 +189,7 @@ class Policy:
                 out.append(RangeRisk(var(p, "api_key_env"), timeout=timeout))
             elif t == "webacy":
                 out.append(WebacyRisk(var(p, "api_key_env"), timeout=timeout,
-                                      high_risk_score=p.get("high_risk_score", 100)))
+                                      high_risk_score=p.get("high_risk_score", 50)))
             elif t == "elliptic":
                 out.append(EllipticRisk(var(p, "api_key_env"), var(p, "api_secret_env"), timeout=timeout,
                                         high_risk_score=p.get("high_risk_score", 5.0),

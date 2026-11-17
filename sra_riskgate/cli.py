@@ -1,6 +1,7 @@
 """``sra-riskgate`` command line (1.9.0+): check a payment, validate a policy file, verify a receipt.
 
     sra-riskgate check --chain 8453 --sender 0x... --to 0x... --amount 25 [--policy policy.json] [--json]
+                                    # a dry run: budgets are read, never spent (add --record to count it)
     sra-riskgate policy validate payment-policy.json
     sra-riskgate receipt verify receipt.json --key-env SRA_RECEIPT_KEY      # HMAC receipts
     sra-riskgate receipt verify receipt.json --signer 0xYourReceiptAddress  # Ethereum receipts
@@ -15,6 +16,7 @@ Exit codes, so a CI pipeline or a shell script can act on the result:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import base64
 import json
 import os
@@ -51,8 +53,12 @@ def _cmd_check(args) -> int:
         if "known_recipients" in kw:
             return _fail("--known is also set by the policy file; keep one of them")
         kw["known_recipients"] = args.known
-    r = check_payment(chain_id=args.chain, sender=args.sender, recipient=args.to, amount=args.amount,
-                      token=args.token, untrusted_request=args.text, peg_deviation_pct=args.peg, **kw)
+    from sra_riskgate.spend import suppress_recording
+    # A dry run by default: budgets are checked against the ledger, but this payment is not added to it,
+    # so testing a policy never spends an agent's real budget. --record counts it like an agent's payment.
+    with (contextlib.nullcontext() if args.record else suppress_recording()):
+        r = check_payment(chain_id=args.chain, sender=args.sender, recipient=args.to, amount=args.amount,
+                          token=args.token, untrusted_request=args.text, peg_deviation_pct=args.peg, **kw)
     d = r.decision.value
     data = {"decision": d, "risk_score": r.risk_score, "flags": r.flags, "explanation": r.explanation,
             "required_actions": r.required_actions}
@@ -133,6 +139,9 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--max-amount", type=float, default=None, help="per-payment ceiling (default 1000)")
     c.add_argument("--known", nargs="+", default=None, metavar="ADDRESS", help="payees you already trust")
     c.add_argument("--policy", default=None, help="a policy file (JSON or YAML)")
+    c.add_argument("--record", action="store_true",
+                   help="count an approved payment against the policy's budgets (default: a dry run that "
+                        "reads the ledger but never writes to it)")
     c.add_argument("--json", action="store_true", help="print JSON")
     c.set_defaults(func=_cmd_check)
 

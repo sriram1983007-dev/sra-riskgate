@@ -119,3 +119,18 @@ def test_usage_errors_and_version(capsys):
 def test_module_entry_point_runs():
     r = subprocess.run([sys.executable, "-m", "sra_riskgate.cli", "version"], capture_output=True, text=True)
     assert r.returncode == 0 and r.stdout.strip()
+
+
+def test_check_is_a_dry_run_unless_record(tmp_path, capsys):
+    """1.9.1: testing a policy from the command line never spends the agent's real budget."""
+    led = tmp_path / "ledger.jsonl"
+    pol = tmp_path / "p.json"
+    pol.write_text(json.dumps({"version": 1, "budgets": {"total": 30}, "ledger": str(led)}))
+    args = BASE + ["--amount", "20", "--peg", "0", "--policy", str(pol)]
+    assert run(args, capsys)[0] == 0 and run(args, capsys)[0] == 0      # dry runs: both approve
+    assert not led.exists() or led.read_text() == ""
+    assert run(args + ["--record"], capsys)[0] == 0                   # counted
+    assert len(led.read_text().splitlines()) == 1
+    code, out, _ = run(args, capsys)                                  # the ledger is still read
+    assert code == 10 and "BUDGET_EXCEEDED" in out
+    assert len(led.read_text().splitlines()) == 1

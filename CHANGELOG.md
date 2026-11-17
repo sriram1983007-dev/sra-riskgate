@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.1 — 2026-11-17
+
+### Fixed
+- **`sra-riskgate check` no longer spends a real budget.** With a policy file that names a `ledger`, an approved
+  check was recorded in that ledger like an agent's payment, so testing a policy used up the agent's budget. The
+  command is now a dry run: it reads the ledger (a payment over budget is still held) but never writes to it.
+  `--record` counts the payment when that is what you want. The library's `check_payment` is unchanged.
+
 ## 1.9.0 — 2026-11-17
 
 ### Added

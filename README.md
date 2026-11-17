@@ -109,6 +109,10 @@ sra-riskgate receipt verify receipt.json --key-env SRA_RECEIPT_KEY
 hold. `policy validate` and `receipt verify` exit 0 when valid and 1 when not; add `--json` to any of them for
 machine-readable output.
 
+`check` is a dry run (1.9.1+): with a policy that has budgets it reads the ledger, so a payment over budget is
+still held, but it never adds to it, so testing a policy does not spend your agent's budget. Add `--record` to
+count the payment.
+
 ## Install
 
 ```bash

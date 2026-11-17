@@ -27,7 +27,7 @@ def test_hmac_receipt_round_trip_and_contents():
                        now=dt.datetime(2026, 11, 16, 18, 0, 5, 123, tzinfo=dt.timezone.utc))
     assert verify_receipt(rc, key=KEY)
     assert rc["decision"] == "approve" and rc["alg"] == "hmac-sha256" and rc["signer"] == "ops-1"
-    assert rc["issued_at"] == "2026-11-16T18:00:05Z" and rc["library"].startswith("sra-riskgate 1.8")
+    assert rc["issued_at"] == "2026-11-16T18:00:05Z" and rc["library"] == f"sra-riskgate {__import__('sra_riskgate').__version__}"
     assert rc["payment"] == PAYMENT and len(rc["id"]) == 32 and rc["policy_sha256"] is None
     json.dumps(rc)  # plain JSON
     assert type(rc["decision"]) is str  # not the ActionDecision enum

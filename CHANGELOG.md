@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.0 — 2026-11-17
+
+### Added
+- **`sra-riskgate` command line.** `sra-riskgate check` checks one payment (optionally under a `--policy` file) and
+  exits 0 approve, 10 hold, 20 reject, so a CI job or script can stop on a hold; `sra-riskgate policy validate`
+  checks a policy file and prints its SHA-256; `sra-riskgate receipt verify` verifies an HMAC (`--key-env`) or
+  Ethereum (`--signer`) receipt, including one inside a whole MCP tool result. `--json` on every command.
+
+### Changed
+- README and PyPI page: what it stops, who it is for, the roadmap, and a design-partner link up front. Package
+  summary, keywords and project links updated. No change to any check.
+
 ## 1.8.1 — 2026-11-16
 
 ### Fixed (Audit #18)

@@ -8,22 +8,66 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb)
 [![Paper DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23715017.svg)](https://doi.org/10.5281/zenodo.23715017)
 
-Risk checks for stablecoin and AI-agent payments: USDC, USDT, USDB (Bridge) and USDG, checked before the agent
-signs and verified after settlement.
+**The pre-sign firewall for AI agents that pay.**
+Every stablecoin payment your agent is about to sign is checked first: approve, hold or reject, on the exact
+bytes it will sign, failing closed, without ever holding your money.
 
-This repository contains:
+```bash
+pip install sra-riskgate
+sra-riskgate check --chain 8453 --sender 0xYourAgent --to 0xPayee --amount 25 --peg 0
+```
 
-- **`sra-riskgate`**, a small Python SDK with deterministic pre-filter rules (an offline OFAC SDN address
-  match, your own blocklist and new-payee hold, address validation, self-transfer blocking, amount ceilings,
-  depeg checks in both directions), plus integrations for
-  [x402](https://github.com/x402-foundation/x402) payment flows and [Coinbase AgentKit](https://github.com/coinbase/agentkit).
-- **`eval/`**, the scripts used to benchmark the
-  [SRA-RiskGate-4B](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) model on
-  [sra-stablecoin-risk-bench](https://huggingface.co/datasets/sriram1983007/sra-stablecoin-risk-bench).
+### Why
 
-The SDK does not load the 4B model. Its sanctions check is an exact match against a dated snapshot of
-OFAC's published crypto addresses, not a screening service (see [Sanctions](#sanctions-ofac-sdn-addresses)).
-It is a fast, deterministic first layer; the model handles the full policy and evidence review.
+AI agents now pay for APIs, data and compute on their own, with x402, USDC and smart accounts. Stablecoin
+payments are final: there is no chargeback. And the request that tells the agent what to pay is written by the
+party being paid. In October 2026 the Cloud Security Alliance
+[reviewed 25 flaws in the x402 SDKs](https://labs.cloudsecurityalliance.org/research/csa-research-note-x402-agent-payment-sdk-flaws-20261025-csa/)
+and recommended exactly this: controls enforced outside the model, cumulative budgets, and the payer's policy,
+not the payee's request, deciding what is paid.
+
+### What it stops
+
+| Attack or failure | What happens | Flag |
+| --- | --- | --- |
+| A look-alike payee planted in the wallet's history (address poisoning) | **Reject**, naming the real payee it imitates | `LOOKALIKE_RECIPIENT` |
+| An unlimited token approval, permit or EIP-7702 delegation dressed up as a payment | **Hold** | `UNLIMITED_APPROVAL`, `CODE_DELEGATION` |
+| An x402 signature that stays valid for weeks | **Hold** | `LONG_LIVED_AUTHORIZATION` |
+| Payment text that vouches for itself ("pre-approved by treasury") | **Hold** | `self_asserted_verification_in_payload` |
+| Fifty small payments under the per-payment limit | **Hold** once the rolling budget is used | `BUDGET_EXCEEDED` |
+| A sudden burst, or an amount far above the wallet's usual | **Hold** | `RATE_SPIKE`, `AMOUNT_SPIKE` |
+| A sanctioned address (offline OFAC list, or Chainalysis, TRM, Range, Webacy, Elliptic) | **Reject** | `OFAC_SDN_MATCH`, `PROVIDER_SANCTIONS_MATCH` |
+| A screening provider that times out, a corrupt ledger, a typo in a setting | **Hold** or reject, never a silent pass | `SCREENING_UNAVAILABLE`, `CHECK_FAILED` |
+
+It reads every signing path an agent uses: plain transactions, x402 / EIP-3009 authorizations, smart-account
+UserOperations (call by call, batches summed), Circle Wallets and Circle Gateway requests, in USDC, USDT, USDB,
+USDG or any dollar stablecoin you register. After settlement it confirms from the chain that exactly the approved
+payment arrived, and every decision can carry a signed, tamper-evident receipt.
+
+### Who it is for
+
+- **Teams running AI agents that pay**: one policy file with budgets, trusted payees and screening for every agent.
+- **Agent frameworks and wallets**: drop-in hooks for [MCP](https://pypi.org/project/sra-riskgate-mcp/)
+  (Claude Desktop, Cursor), [LangChain](https://pypi.org/project/langchain-sra-riskgate/),
+  [CrewAI](https://pypi.org/project/crewai-sra-riskgate/), Coinbase AgentKit, x402 clients and
+  [ElizaOS](https://www.npmjs.com/package/elizaos-plugin-sra-riskgate).
+- **x402 facilitators and payment servers**: refuse over-long signatures and poisoned payees before settling them.
+- **Compliance and audit**: signed receipts that prove what was decided, under which policy, and when.
+
+### Open by design
+
+Apache 2.0, one dependency (pydantic), no GPU, no network unless you turn on a screening provider, about
+1,000 tests. Optional: [SRA-RiskGate-4B](https://huggingface.co/sriram1983007/SRA-RiskGate-4B), a 4B model for
+the judgement calls rules cannot make, with a [public benchmark](https://huggingface.co/datasets/sriram1983007/sra-stablecoin-risk-bench)
+and [every prediction published](https://huggingface.co/datasets/sriram1983007/sra-bench-results).
+This repository also holds the `eval/` scripts behind the [paper](https://doi.org/10.5281/zenodo.23715017).
+The SDK's offline sanctions check is an exact match against a dated snapshot of OFAC's published crypto
+addresses, not a screening service (see [Sanctions](#sanctions-ofac-sdn-addresses)).
+
+**Roadmap:** a shared spend ledger across machines, a hosted policy console with approvals and alerts, managed
+screening (several providers, one contract), and live sanctions and look-alike threat feeds.
+**Building agents that move money?** [Become a design partner](https://github.com/sriram1983007-dev/sra-riskgate/issues/new?title=Design%20partner%3A%20&body=Who%20you%20are%2C%20what%20your%20agents%20pay%20for%2C%20and%20which%20rails%20you%20use%3A)
+and shape what comes next.
 
 ## Try it in 30 seconds
 
@@ -52,6 +96,18 @@ Nothing needs a GPU, an API key or a network connection.
 Or run every check in your browser, nothing to install: [open the notebook in Colab](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb).
 
 Walkthrough with more examples: [Stop your AI agent from signing an unlimited USDC approval](https://dev.to/sriram1983007/stop-your-ai-agent-from-signing-an-unlimited-usdc-approval-10c0) (DEV.to).
+
+## Command line (1.9.0+)
+
+```bash
+sra-riskgate check --chain 8453 --sender 0xAgent --to 0xPayee --amount 25 --peg 0 --policy policy.json
+sra-riskgate policy validate payment-policy.json
+sra-riskgate receipt verify receipt.json --key-env SRA_RECEIPT_KEY
+```
+
+`check` exits with **0 approve, 10 hold, 20 reject**, so a CI job or a shell script can stop a payment flow on a
+hold. `policy validate` and `receipt verify` exit 0 when valid and 1 when not; add `--json` to any of them for
+machine-readable output.
 
 ## Install
 

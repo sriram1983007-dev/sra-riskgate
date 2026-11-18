@@ -5,7 +5,7 @@ from typing import Iterable, Optional
 
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
 from sra_riskgate.counterparty import (BLOCKLIST_FLAG, LOOKALIKE_FLAG, NEW_COUNTERPARTY_FLAG, find_lookalike, merge,
-                                       parse_address_list)
+                                       parse_address_list, parse_lookalike_check)
 from sra_riskgate.sanctions import FLAG as SANCTIONS_FLAG, NOT_CHECKED_FLAG, SanctionsList, _normalise
 
 ROUND_AMOUNT_FLAG = "ROUND_AMOUNT"
@@ -187,8 +187,13 @@ class RulePreFilter:
 
     def inspect(self, payload: TransactionPayload, *,
                 known_recipients: Optional[Iterable[str]] = None,
-                blocked_addresses: Optional[Iterable[str]] = None) -> RiskAssessment:
-        """Apply the rules. ``known_recipients`` and ``blocked_addresses`` add to this gate's own lists."""
+                blocked_addresses: Optional[Iterable[str]] = None,
+                lookalike_check: str = "standard") -> RiskAssessment:
+        """Apply the rules. ``known_recipients`` and ``blocked_addresses`` add to this gate's own lists.
+
+        ``lookalike_check="strict"`` (1.10.0+) also rejects a look-alike sharing only 3 characters at each end.
+        """
+        min_total = parse_lookalike_check(lookalike_check)
         sanctioned = self.screen_sanctions(payload.sender, payload.recipient)
         if sanctioned is not None:
             return sanctioned
@@ -196,7 +201,7 @@ class RulePreFilter:
         if blocked is not None:
             return blocked
         known = merge(self.known_recipients, parse_address_list("known_recipients", known_recipients))
-        lookalike = find_lookalike(payload.recipient, known)
+        lookalike = find_lookalike(payload.recipient, known, min_total)
         if lookalike is not None:
             imitated, prefix, suffix = lookalike
             r = payload.recipient.lower()

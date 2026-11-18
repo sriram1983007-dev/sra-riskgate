@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.10.0 — 2026-11-18
+
+### Added
+- **`lookalike_check="strict"`.** The look-alike payee check (`LOOKALIKE_RECIPIENT`) can also reject a recipient
+  that shares only 3 characters at each end with a known payee (the standard rule needs 7 in total, 3 or more at
+  each end). In 90 days of real Ethereum USDC and USDT payments, the standard rule rejected 171 of 179 real
+  address-poisoning attacks, and all 8 it missed were 3+3 look-alikes (held as new payees, never approved).
+  Strict rejected all 179 and wrongly rejected none of 4,967 normal payments by wallets with 2 to 200 payees.
+  Available on every `check_*` function, as `lookalike_check` in the policy file and as `--lookalike strict` on
+  the command line; a policy setting and the flag together are an error. Any other value is a configuration error.
+  `"standard"` stays the default, so no existing decision changes.
+
 ## 1.9.1 — 2026-11-17
 
 ### Fixed

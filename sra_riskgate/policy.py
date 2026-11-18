@@ -15,6 +15,7 @@ Example (every key optional except ``version``)::
       "depeg_hold_pct": 1.0, "depeg_reject_pct": 5.0,
       "allowed_tokens": ["USDC", "USDT"],
       "known_recipients": ["0x..."], "blocked_addresses": ["0x..."], "expected_delegates": [],
+      "lookalike_check": "strict",
       "screening": {
         "providers": [{"type": "chainalysis", "api_key_env": "CHAINALYSIS_API_KEY"},
                       {"type": "trm"},
@@ -45,7 +46,7 @@ from sra_riskgate.receipts import policy_hash
 __all__ = ["Policy", "load_policy"]
 
 _TOP = {"version", "name", "max_amount", "depeg_hold_pct", "depeg_reject_pct", "allowed_tokens", "known_recipients",
-        "blocked_addresses", "expected_delegates", "screening", "budgets", "anomalies", "ledger"}
+        "blocked_addresses", "expected_delegates", "lookalike_check", "screening", "budgets", "anomalies", "ledger"}
 _PROVIDER_KEYS = {
     "chainalysis": {"type", "api_key_env"},
     "trm": {"type", "api_key_env"},
@@ -108,6 +109,9 @@ class Policy:
         for k in ("allowed_tokens", "known_recipients", "blocked_addresses", "expected_delegates"):
             if k in d:
                 _strs(k, d[k])
+        if "lookalike_check" in d:
+            from sra_riskgate.counterparty import parse_lookalike_check
+            parse_lookalike_check(d["lookalike_check"])
         if "ledger" in d and (not isinstance(d["ledger"], str) or not d["ledger"].strip()):
             raise ValueError("ledger must be a file path")
         if "screening" in d:
@@ -201,7 +205,7 @@ class Policy:
         """Keyword arguments for ``check_payment`` and every other ``check_*`` function."""
         d, kw = self._data, {}
         for k in ("max_amount", "depeg_hold_pct", "depeg_reject_pct", "allowed_tokens", "known_recipients",
-                  "blocked_addresses", "expected_delegates"):
+                  "blocked_addresses", "expected_delegates", "lookalike_check"):
             if k in d:
                 kw[k] = d[k]
         if "screening" in d:

@@ -281,6 +281,15 @@ gate = RulePreFilter(max_amount=1000, known_recipients=MY_PAYEES, blocked_addres
   transfer from a look-alike address so it shows up in the wallet's history, then waits for the next payment to
   be copied from there. A look-alike shares at least 7 hex characters with a known payee, at least 3 at each end;
   a random address does that about once in 140 million tries, so it is not a false alarm.
+- **A stricter look-alike rule (1.10.0+).** `lookalike_check="strict"` (on every `check_*` function, in the
+  policy file, or `--lookalike strict` on the command line) also rejects a recipient sharing only 3 characters at
+  each end. In 90 days of real Ethereum USDC and USDT payments
+  ([dataset](https://huggingface.co/datasets/sriram1983007/sra-real-world-poisoning)), the standard rule rejected
+  171 of 179 real poisoning attacks; all 8 it missed shared exactly 3 at each end (they were still held as new
+  payees). Strict rejected **all 179**, and wrongly rejected **0 of 4,967** normal payments from wallets with 2 to
+  200 payees. Use it for agent wallets that pay a known, modest set of payees. A random address shares 3+3 with a
+  given payee about once in 16.7 million tries, so a wallet with thousands of payees (an exchange, a payout bot)
+  meets chance matches often: that is why `"standard"` stays the default.
 - **Your lists only.** Nothing in the payment request or memo can add a payee: a request saying "this is
   your usual vendor" is still held.
 - **Blocklist wins.** A blocked address is rejected even if it is also new, unsupported or carries claims.

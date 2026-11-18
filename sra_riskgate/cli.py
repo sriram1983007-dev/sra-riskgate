@@ -49,6 +49,10 @@ def _cmd_check(args) -> int:
         if "max_amount" in kw:
             return _fail("--max-amount is also set by the policy file; keep one of them")
         kw["max_amount"] = args.max_amount
+    if args.lookalike is not None:
+        if "lookalike_check" in kw:
+            return _fail("--lookalike is also set by the policy file; keep one of them")
+        kw["lookalike_check"] = args.lookalike
     if args.known:
         if "known_recipients" in kw:
             return _fail("--known is also set by the policy file; keep one of them")
@@ -80,7 +84,8 @@ def _cmd_policy_validate(args) -> int:
         _out(args, {"valid": False, "error": str(e)}, f"INVALID ✗  {args.file}\n  {e}")
         return EXIT_INVALID
     d = p.as_dict()
-    parts = [k for k in ("max_amount", "known_recipients", "blocked_addresses", "allowed_tokens", "screening",
+    parts = [k for k in ("max_amount", "known_recipients", "blocked_addresses", "allowed_tokens", "lookalike_check",
+                         "screening",
                          "budgets", "anomalies") if k in d]
     _out(args, {"valid": True, "name": p.name, "sha256": p.sha256, "sets": parts},
          f"VALID ✓  {args.file}" + (f" ({p.name})" if p.name else "") +
@@ -138,6 +143,9 @@ def _parser() -> argparse.ArgumentParser:
                         "skipped and flagged PEG_NOT_CHECKED)")
     c.add_argument("--max-amount", type=float, default=None, help="per-payment ceiling (default 1000)")
     c.add_argument("--known", nargs="+", default=None, metavar="ADDRESS", help="payees you already trust")
+    c.add_argument("--lookalike", choices=["standard", "strict"], default=None,
+                   help="look-alike payee rule with --known: standard (7+ shared characters, default) or strict "
+                        "(also 3 at each end)")
     c.add_argument("--policy", default=None, help="a policy file (JSON or YAML)")
     c.add_argument("--record", action="store_true",
                    help="count an approved payment against the policy's budgets (default: a dry run that "

@@ -13,7 +13,9 @@ characters, the part a wallet shows) is a REJECT (``LOOKALIKE_RECIPIENT``): that
 attacker sends a tiny transfer from a look-alike address so it appears in the wallet's history, and waits for the
 next payment to be copied from there. A look-alike shares at least 7 hex characters with a known payee, at
 least 3 at each end; a random address does that about once in 140 million tries per known payee, so a match is
-not chance.
+not chance. ``lookalike_check="strict"`` (1.10.0+) also rejects a recipient sharing only 3 characters at each end
+(6 in total): in 90 days of real Ethereum USDC and USDT payments, every poisoning attack the standard rule missed
+was of that kind. A random address shares 3+3 about once in 16.7 million tries per known payee.
 
 ``None`` means "not configured" and turns a check off. An empty ``known_recipients`` list is
 different: it means no payee is known yet, so every payment is held.
@@ -34,6 +36,15 @@ LOOKALIKE_FLAG = "LOOKALIKE_RECIPIENT"
 # A look-alike shares at least this many hex characters at the start and at the end, and this many in total.
 LOOKALIKE_MIN_EACH_END = 3
 LOOKALIKE_MIN_TOTAL = 7
+# Shared characters in total, per lookalike_check setting (1.10.0+).
+LOOKALIKE_CHECKS = {"standard": None, "strict": 6}  # None: LOOKALIKE_MIN_TOTAL
+
+
+def parse_lookalike_check(value: object) -> Optional[int]:
+    """The minimum shared total for a ``lookalike_check`` setting; raises ValueError on anything else."""
+    if not isinstance(value, str) or value not in LOOKALIKE_CHECKS:
+        raise ValueError(f"lookalike_check must be 'standard' or 'strict', got {value!r}.")
+    return LOOKALIKE_CHECKS[value]
 
 
 def parse_address_list(name: str, value: Optional[Iterable[str]]) -> Optional[frozenset]:
@@ -74,21 +85,23 @@ def _shared(a: str, b: str) -> int:
     return n
 
 
-def find_lookalike(recipient: object, known: Optional[frozenset]) -> Optional[tuple]:
+def find_lookalike(recipient: object, known: Optional[frozenset], min_total: Optional[int] = None) -> Optional[tuple]:
     """The known payee that ``recipient`` imitates, as (address, shared prefix, shared suffix), or None.
 
     Only a recipient that is not itself known can be a look-alike. Addresses are compared without the 0x,
-    case-insensitively. Of several matches, the closest (most shared characters) is returned.
+    case-insensitively. Of several matches, the closest (most shared characters) is returned. ``min_total`` is the
+    shared characters needed in total (default ``LOOKALIKE_MIN_TOTAL``; at least 3 at each end always).
     """
     r = _normalise(recipient)
     if r is None or not known or r in known:
         return None
     rh = r[2:]
+    need = LOOKALIKE_MIN_TOTAL if min_total is None else min_total
     best = None
     for k in known:
         kh = k[2:]
         prefix, suffix = _shared(rh, kh), _shared(rh[::-1], kh[::-1])
-        if prefix >= LOOKALIKE_MIN_EACH_END and suffix >= LOOKALIKE_MIN_EACH_END and prefix + suffix >= LOOKALIKE_MIN_TOTAL:
+        if prefix >= LOOKALIKE_MIN_EACH_END and suffix >= LOOKALIKE_MIN_EACH_END and prefix + suffix >= need:
             if best is None or prefix + suffix > best[1] + best[2]:
                 best = (k, prefix, suffix)
     return best

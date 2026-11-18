@@ -6,7 +6,7 @@ from typing import Any, Iterable, Optional
 from sra_riskgate.account_code import account_hold
 from sra_riskgate.chains import STABLECOINS, parse_allowed_tokens
 from sra_riskgate.client import DEFAULT_SANCTIONS_MAX_AGE_DAYS, RulePreFilter
-from sra_riskgate.counterparty import parse_address_list
+from sra_riskgate.counterparty import parse_address_list, parse_lookalike_check
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
 from sra_riskgate.payload_claims import FLAG as CLAIMS_FLAG
 from sra_riskgate.payload_claims import scan_payload_claims
@@ -56,6 +56,7 @@ def _check_payment_core(
     screening_providers: Optional[Iterable[Any]] = None,
     screening_hold_at: str = "high",
     screening_reject_at: str = "severe",
+    lookalike_check: str = "standard",
 ) -> RiskAssessment:
     """The checks of ``check_payment`` without budgets; see ``check_payment``."""
     try:
@@ -78,6 +79,7 @@ def _check_payment_core(
                                                     or not all(callable(getattr(p, "screen", None)) for p in providers)):
                 raise ValueError("screening_providers must be a non-empty list of providers with a screen() method")
             screening_decision([], hold_at=screening_hold_at, reject_at=screening_reject_at)  # validates thresholds
+            parse_lookalike_check(lookalike_check)
         except (TypeError, ValueError) as e:
             return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
                             f"The risk gate is misconfigured: {_first_error(e)}", ["fix_configuration"])
@@ -115,7 +117,8 @@ def _check_payment_core(
             return _verdict(ActionDecision.REJECT, ["INVALID_PAYMENT"],
                             f"Payment failed validation: {_first_error(e)}", ["reject_payment"])
 
-        result = gate.inspect(payload, known_recipients=known_recipients, blocked_addresses=blocked_addresses)
+        result = gate.inspect(payload, known_recipients=known_recipients, blocked_addresses=blocked_addresses,
+                              lookalike_check=lookalike_check)
         if result.decision == ActionDecision.REJECT:
             return result
         if providers:
@@ -173,6 +176,7 @@ def check_payment(
     screening_reject_at: str = "severe",
     spend_guard: Optional[SpendGuard] = None,
     payment_id: Optional[str] = None,
+    lookalike_check: str = "standard",
 ) -> RiskAssessment:
     """Check a stablecoin payment before sending it. Never raises on bad payment data; anything unexpected becomes HOLD.
 
@@ -198,6 +202,8 @@ def check_payment(
          depeg thresholds. If ``known_recipients`` is given (even empty), a recipient not on it
          gives HOLD (NEW_COUNTERPARTY), and one that imitates a known payee (same first and last hex
          characters) gives REJECT (LOOKALIKE_RECIPIENT): address poisoning. ``None`` turns both off.
+         A look-alike shares at least 7 hex characters with a known payee, 3 or more at each end;
+         ``lookalike_check="strict"`` (1.10.0+) rejects one sharing only 3 at each end too.
       4b. Screening providers (1.4.0+): if ``screening_providers`` is given (e.g. ``[ChainalysisSanctions(key),
           RangeRisk(key)]``), each screens the sender and the recipient. A sanctions match gives REJECT
           (PROVIDER_SANCTIONS_MATCH); risk at or above ``screening_reject_at`` gives REJECT (PROVIDER_RISK_SEVERE),
@@ -224,7 +230,7 @@ def check_payment(
     if payment_id is not None and (not isinstance(payment_id, str) or not payment_id.strip()):
         return _verdict(ActionDecision.REJECT, ["CONFIGURATION_ERROR"],
                         "The risk gate is misconfigured: payment_id must be a non-empty string", ["fix_configuration"])
-    result = _check_payment_core(chain_id=chain_id, sender=sender, recipient=recipient, amount=amount, token=token, untrusted_request=untrusted_request, peg_deviation_pct=peg_deviation_pct, max_amount=max_amount, depeg_hold_pct=depeg_hold_pct, depeg_reject_pct=depeg_reject_pct, check_sanctions=check_sanctions, sanctions_list=sanctions_list, gate=gate, known_recipients=known_recipients, blocked_addresses=blocked_addresses, sanctions_max_age_days=sanctions_max_age_days, account_code=account_code, expected_delegates=expected_delegates, allowed_tokens=allowed_tokens, screening_providers=screening_providers, screening_hold_at=screening_hold_at, screening_reject_at=screening_reject_at)
+    result = _check_payment_core(chain_id=chain_id, sender=sender, recipient=recipient, amount=amount, token=token, untrusted_request=untrusted_request, peg_deviation_pct=peg_deviation_pct, max_amount=max_amount, depeg_hold_pct=depeg_hold_pct, depeg_reject_pct=depeg_reject_pct, check_sanctions=check_sanctions, sanctions_list=sanctions_list, gate=gate, known_recipients=known_recipients, blocked_addresses=blocked_addresses, sanctions_max_age_days=sanctions_max_age_days, account_code=account_code, expected_delegates=expected_delegates, allowed_tokens=allowed_tokens, screening_providers=screening_providers, screening_hold_at=screening_hold_at, screening_reject_at=screening_reject_at, lookalike_check=lookalike_check)
     if spend_guard is None or result.decision == ActionDecision.REJECT:
         return result
     if isinstance(amount, bool) or not isinstance(amount, (int, float)):

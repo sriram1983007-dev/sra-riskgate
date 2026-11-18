@@ -286,8 +286,10 @@ gate = RulePreFilter(max_amount=1000, known_recipients=MY_PAYEES, blocked_addres
   each end. In 90 days of real Ethereum USDC and USDT payments
   ([dataset](https://huggingface.co/datasets/sriram1983007/sra-real-world-poisoning)), the standard rule rejected
   171 of 179 real poisoning attacks; all 8 it missed shared exactly 3 at each end (they were still held as new
-  payees). Strict rejected **all 179**, and wrongly rejected **0 of 4,967** normal payments from wallets with 2 to
-  200 payees. Use it for agent wallets that pay a known, modest set of payees. A random address shares 3+3 with a
+  payees). Strict rejects those 8 too; since an attack in that dataset is defined as sharing at least 3
+  characters at each end, strict rejecting every labelled attack follows from the definition and is not separate
+  evidence. The evidence for strict is its cost: it wrongly rejected **0 of 4,967** normal payments from wallets
+  with 2 to 200 payees (reproducible from the dataset's shared-character columns). Use it for agent wallets that pay a known, modest set of payees. A random address shares 3+3 with a
   given payee about once in 16.7 million tries, so a wallet with thousands of payees (an exchange, a payout bot)
   meets chance matches often: that is why `"standard"` stays the default.
 - **Your lists only.** Nothing in the payment request or memo can add a payee: a request saying "this is
@@ -617,8 +619,10 @@ provider = CallableProvider("my-provider", my_lookup)
 ```
 
 `screen_addresses(providers, addresses, chain_id)` returns every provider's raw `ScreeningResult` if you want to
-log or show them. The adapters follow each provider's published API documentation as of November 2026; their
-tests use response shapes from that documentation, not live calls. TRM shares its full API documentation and a
+log or show them. The adapters are built from each provider's published API documentation as of November 2026 and
+tested against responses shaped like it; none has yet been run against a live provider account. Some Elliptic fields
+they read (`is_after_sanction_date` as a sanctions marker, `entity_details`) go beyond Elliptic's published schema
+and are read defensively; validate against your own account before relying on them. TRM shares its full API documentation and a
 key after a sign-up form; `TRMSanctions` follows its published operation (`POST /public/v1/sanctions/screening`
 with `[{"address": ...}]`, answer `isSanctioned`), and any other answer holds the payment rather than passing it.
 `TRMSanctions()` without a key sends no credentials; if TRM requires one, every check holds.

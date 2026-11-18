@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.10.1 — 2026-11-18
+
+### Fixed (Audit #19/#20)
+- **Elliptic: `entity_details` nested in the wallet's own entity.** A response whose sanctions listing sits inside
+  a `cluster_entities` element (`entity_details.sanctions`, for example `"OFAC-SDN"`), with no
+  `is_after_sanction_date`, was approved: only a top-level `entity_details` was read. It is now a sanctions match
+  (`PROVIDER_SANCTIONS_MATCH`, reject). A `sanctions` value given as a list name (a non-empty string such as
+  `"OFAC-SDN"`) now counts at either level; empty values (`""`, `"none"`, `[]`, `null`, `false`) still do not.
+
+### Documentation
+- 1.10.0's "strict rejected all 179" was not separate evidence: the dataset defines an attack as sharing at least 3
+  characters at each end, which is exactly what strict rejects. The evidence for strict is 0 of 4,967 normal
+  payments wrongly rejected. README reworded.
+- Screening providers: "follow each provider's published API documentation" now says the adapters are built from
+  it and tested against responses shaped like it, none yet run against a live provider account, and that the
+  Elliptic fields read beyond the published schema should be validated against your own account.
+
 ## 1.10.0 — 2026-11-18
 
 ### Added

@@ -275,7 +275,8 @@ class EllipticRisk:
     - A sanctions match (the wallet's own cluster, not its exposure): a label in ``cluster_entities`` whose category
       mentions sanctions, or that carries ``is_after_sanction_date`` (set only for sanctioned entities); a matched
       element whose ``risk_triggers.is_sanctioned`` is true for the wallet's own entity; or, if present,
-      ``entity_details`` listing sanctions (1.8.1+).
+      ``entity_details`` listing sanctions, at the top of the response (1.8.1+) or inside the wallet's own
+      ``cluster_entities`` element (1.10.1+).
     - ``risk_score`` (0 to 10, from the risk rules in your Elliptic account) sets the level: at or above
       ``severe_risk_score`` (default 10) ``severe``, at or above ``high_risk_score`` (default 5) ``high``, any other
       positive score ``medium``, 0 ``low``. ``null`` means no risk rule triggered: ``none``. Set the two
@@ -368,6 +369,11 @@ class EllipticRisk:
             if isinstance(e.get("is_after_sanction_date"), bool):
                 sanctioned = True
                 reasons.append(f"{e.get('name') or 'unnamed'} is a sanctioned entity")
+            # entity_details nested in the wallet's own entity (1.10.1+, Audit #19/#20): a sanctions listing there
+            # is a match even without is_after_sanction_date
+            if _elliptic_entity_details_sanctioned(e.get("entity_details")):
+                sanctioned = True
+                reasons.append(f"{e.get('name') or 'unnamed'}: entity_details lists sanctions")
             if e.get("name") or cat:
                 reasons.append(f"{e.get('name') or 'unnamed'} ({cat or 'no category'})")
         if _elliptic_entity_details_sanctioned(body.get("entity_details")):
@@ -417,13 +423,16 @@ class EllipticRisk:
 
 def _elliptic_entity_details_sanctioned(details: Any) -> bool:
     """True if an ``entity_details`` object (or list of them) lists sanctions. Not in Elliptic's published schema;
-    checked defensively because some responses carry it."""
+    checked defensively because some responses carry it, at the top level or inside a ``cluster_entities`` element.
+    ``sanctions`` counts when it is true, a non-empty list or object, or a list name such as "OFAC-SDN"."""
     items = details if isinstance(details, list) else [details] if isinstance(details, Mapping) else []
     for d in items:
         if not isinstance(d, Mapping):
             continue
         s = d.get("sanctions")
         if s is True or (isinstance(s, (list, Mapping)) and len(s) > 0) or d.get("is_sanctioned") is True:
+            return True
+        if isinstance(s, str) and s.strip().lower() not in ("", "none", "no", "false", "n/a", "null", "[]"):
             return True
     return False
 

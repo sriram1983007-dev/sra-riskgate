@@ -252,3 +252,34 @@ def test_a_sanctioned_entity_response_never_approves_in_check_payment():
     p, _ = provider(lambda b: (200, _with_trigger("e-9", "Garantex")) if b["subject"]["hash"] == PAYEE
                     else (200, analysis(None)))
     assert check_payment(**BASE, screening_providers=[p]).decision == ActionDecision.HOLD
+
+
+# ---------------------------------------------------------------- 1.10.1: Audit #19/#20 (nested entity_details)
+
+def _nested(details, after_sanction_date=None):
+    """A Microvault-shaped response: the sanctions listing sits inside the wallet's own cluster entity."""
+    body = analysis(None, entities=[("Microvault", "Exchange")])
+    body["cluster_entities"][0].update({"entity_id": "e-1", "entity_details": details})
+    if after_sanction_date is not None:
+        body["cluster_entities"][0]["is_after_sanction_date"] = after_sanction_date
+    return body
+
+
+@pytest.mark.parametrize("details", [{"sanctions": ["OFAC-SDN"]}, {"sanctions": "OFAC-SDN"},
+                                     [{"sanctions": [{"list": "OFAC SDN", "program": "CYBER2"}]}],
+                                     {"sanctions": True}, {"is_sanctioned": True}])
+def test_nested_entity_details_without_sanction_date_rejects(details):
+    p, _ = provider((200, _nested(details)))
+    r = p.screen(PAYEE, 8453)
+    assert r.sanctioned is True and r.risk == "severe" and any("entity_details lists sanctions" in x for x in r.reasons)
+    res = check_payment(**BASE, screening_providers=[provider((200, _nested(details)))[0]])
+    assert res.decision == ActionDecision.REJECT and "PROVIDER_SANCTIONS_MATCH" in res.flags
+
+
+@pytest.mark.parametrize("details", [{"sanctions": []}, {"sanctions": None}, {"sanctions": ""},
+                                     {"sanctions": "none"}, {"sanctions": False}, [], None, "x"])
+def test_nested_entity_details_without_a_listing_changes_nothing(details):
+    p, _ = provider((200, _nested(details)))
+    r = p.screen(PAYEE, 8453)
+    assert r.sanctioned is False and r.risk == "none"
+    assert check_payment(**BASE, screening_providers=[p]).decision == ActionDecision.APPROVE

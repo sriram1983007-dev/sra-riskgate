@@ -33,6 +33,7 @@ import hmac as _hmac
 import json
 import math
 import secrets
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 __all__ = ["ReceiptSigner", "issue_receipt", "verify_receipt", "canonical_json", "policy_hash"]
@@ -104,9 +105,20 @@ class ReceiptSigner:
         return cls("eip191", acct.address, sign)
 
 
+def receipt_sha256(receipt: Mapping) -> str:
+    """SHA-256 of a whole receipt, signature included: the link the next receipt in a chain carries (1.11.0+)."""
+    return hashlib.sha256(canonical_json(dict(receipt)).encode()).hexdigest()
+
+
 def issue_receipt(result: Any, signer: ReceiptSigner, *, payment: Optional[Mapping] = None, policy: Any = None,
-                  now: Optional[_dt.datetime] = None) -> dict:
-    """A signed receipt for a ``RiskAssessment`` (or any object or mapping with the same fields)."""
+                  now: Optional[_dt.datetime] = None, previous: Optional[Mapping] = None,
+                  chain_start: bool = False) -> dict:
+    """A signed receipt for a ``RiskAssessment`` (or any object or mapping with the same fields).
+
+    Chained receipts (1.11.0+): pass ``previous`` (the last receipt issued) to link this one to it, or
+    ``chain_start=True`` for the first receipt of a chain. The link (``prev_sha256``) is signed with everything
+    else, so ``verify_receipt_chain`` detects an edited, deleted, inserted or reordered decision.
+    """
     if not isinstance(signer, ReceiptSigner):
         raise ValueError("signer must be a ReceiptSigner")
     r = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
@@ -127,8 +139,58 @@ def issue_receipt(result: Any, signer: ReceiptSigner, *, payment: Optional[Mappi
         "alg": signer.alg,
         "signer": signer.signer_id,
     }
+    if previous is not None and chain_start:
+        raise ValueError("pass previous or chain_start, not both")
+    if previous is not None:
+        if not isinstance(previous, Mapping) or not isinstance(previous.get("sig"), str):
+            raise ValueError("previous must be a signed receipt")
+        body["prev_sha256"] = receipt_sha256(previous)
+    elif chain_start:
+        body["prev_sha256"] = CHAIN_START
     body["sig"] = signer._sign(canonical_json(body))
     return body
+
+
+CHAIN_START = "0" * 64
+
+
+@dataclass(frozen=True)
+class ChainCheck:
+    """Result of ``verify_receipt_chain``: ``ok``, and where and why it first failed."""
+    ok: bool
+    checked: int
+    bad_index: Optional[int] = None
+    reason: str = ""
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+def verify_receipt_chain(receipts: Any, *, key: Optional[bytes] = None,
+                         expected_signer: Optional[str] = None) -> ChainCheck:
+    """Check a chain of receipts, oldest first (1.11.0+). Never raises on bad input.
+
+    Every receipt must verify (``verify_receipt``), the first must start the chain and each later one must carry
+    the SHA-256 of the one before it. This detects an edited, deleted, inserted or reordered receipt. It cannot
+    detect receipts cut off the END of the chain: keep the latest ``receipt_sha256`` somewhere else (a ticket, a
+    log line, a timestamping service) to cover that.
+    """
+    try:
+        rows = list(receipts)
+    except Exception:
+        return ChainCheck(False, 0, 0, "not a list of receipts")
+    if not rows:
+        return ChainCheck(False, 0, None, "empty chain")
+    prev = None
+    for i, r in enumerate(rows):
+        if not verify_receipt(r, key=key, expected_signer=expected_signer):
+            return ChainCheck(False, i, i, "signature or contents do not verify")
+        want = CHAIN_START if i == 0 else receipt_sha256(prev)
+        if r.get("prev_sha256") != want:
+            return ChainCheck(False, i, i, "does not start the chain" if i == 0 else
+                              "does not link to the receipt before it (deleted, inserted or reordered)")
+        prev = r
+    return ChainCheck(True, len(rows))
 
 
 def verify_receipt(receipt: Any, *, key: Optional[bytes] = None, expected_signer: Optional[str] = None) -> bool:

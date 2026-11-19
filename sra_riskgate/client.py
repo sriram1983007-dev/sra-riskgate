@@ -5,7 +5,8 @@ from typing import Iterable, Optional
 
 from sra_riskgate.models import ActionDecision, RiskAssessment, TransactionPayload
 from sra_riskgate.counterparty import (BLOCKLIST_FLAG, LOOKALIKE_FLAG, NEW_COUNTERPARTY_FLAG, find_lookalike, merge,
-                                       parse_address_list, parse_lookalike_check)
+                                       parse_address_list, parse_lookalike_check,
+                                       parse_new_counterparty)
 from sra_riskgate.sanctions import FLAG as SANCTIONS_FLAG, NOT_CHECKED_FLAG, SanctionsList, _normalise
 
 ROUND_AMOUNT_FLAG = "ROUND_AMOUNT"
@@ -188,12 +189,15 @@ class RulePreFilter:
     def inspect(self, payload: TransactionPayload, *,
                 known_recipients: Optional[Iterable[str]] = None,
                 blocked_addresses: Optional[Iterable[str]] = None,
-                lookalike_check: str = "standard") -> RiskAssessment:
+                lookalike_check: str = "standard", new_counterparty: str = "hold") -> RiskAssessment:
         """Apply the rules. ``known_recipients`` and ``blocked_addresses`` add to this gate's own lists.
 
         ``lookalike_check="strict"`` (1.10.0+) also rejects a look-alike sharing only 3 characters at each end.
+        ``new_counterparty="allow"`` (1.11.0+) keeps the look-alike check but no longer holds a payment only
+        because the payee is not in ``known_recipients``: for agents that pay many new services.
         """
         min_total = parse_lookalike_check(lookalike_check)
+        allow_new = parse_new_counterparty(new_counterparty) == "allow"
         sanctioned = self.screen_sanctions(payload.sender, payload.recipient)
         if sanctioned is not None:
             return sanctioned
@@ -256,7 +260,7 @@ class RulePreFilter:
                           "payroll or settlements, are legitimate.")
             reasons.append(round_note)
 
-        if known is not None and payload.recipient.lower() not in known:
+        if known is not None and payload.recipient.lower() not in known and not allow_new:
             flags.append(NEW_COUNTERPARTY_FLAG)
             reasons.append(f"First payment to {payload.recipient}: it is not in known_recipients. Confirm the "
                            "payee through a channel you control, not the payment request, before adding it.")

@@ -17,7 +17,7 @@ from .prompts import (DISPUTE_SYSTEM_PROMPT, PAYMENT_SYSTEM_PROMPT, dispute_mess
 from .sanctions import SanctionsList, is_sanctioned
 from .settlement import SettlementCheck, verify_gateway_balances, verify_settlement
 from .spend import SpendGuard, SpendLedger
-from .receipts import ReceiptSigner, issue_receipt, verify_receipt
+from .receipts import ReceiptSigner, issue_receipt, receipt_sha256, verify_receipt, verify_receipt_chain
 from .policy import Policy, load_policy
 
 __all__ = [
@@ -76,8 +76,10 @@ __all__ = [
     "SpendLedger",
     "ReceiptSigner",
     "issue_receipt",
+    "receipt_sha256",
+    "verify_receipt_chain",
     "verify_receipt",
     "Policy",
     "load_policy",
 ]
-__version__ = "1.10.1"
+__version__ = "1.11.0"

@@ -5,6 +5,8 @@
     sra-riskgate policy validate payment-policy.json
     sra-riskgate receipt verify receipt.json --key-env SRA_RECEIPT_KEY      # HMAC receipts
     sra-riskgate receipt verify receipt.json --signer 0xYourReceiptAddress  # Ethereum receipts
+    sra-riskgate receipt verify-chain receipts.jsonl --key-env SRA_RECEIPT_KEY  # a chain, oldest first
+    sra-riskgate bench [--guard strict] [--json]                            # utility vs security benchmark
     sra-riskgate version
 
 Exit codes, so a CI pipeline or a shell script can act on the result:
@@ -53,6 +55,10 @@ def _cmd_check(args) -> int:
         if "lookalike_check" in kw:
             return _fail("--lookalike is also set by the policy file; keep one of them")
         kw["lookalike_check"] = args.lookalike
+    if args.new_payee is not None:
+        if "new_counterparty" in kw:
+            return _fail("--new-payee is also set by the policy file; keep one of them")
+        kw["new_counterparty"] = args.new_payee
     if args.known:
         if "known_recipients" in kw:
             return _fail("--known is also set by the policy file; keep one of them")
@@ -85,7 +91,7 @@ def _cmd_policy_validate(args) -> int:
         return EXIT_INVALID
     d = p.as_dict()
     parts = [k for k in ("max_amount", "known_recipients", "blocked_addresses", "allowed_tokens", "lookalike_check",
-                         "screening",
+                         "new_counterparty", "screening",
                          "budgets", "anomalies") if k in d]
     _out(args, {"valid": True, "name": p.name, "sha256": p.sha256, "sets": parts},
          f"VALID ✓  {args.file}" + (f" ({p.name})" if p.name else "") +
@@ -126,6 +132,66 @@ def _cmd_receipt_verify(args) -> int:
     return 0 if ok else EXIT_INVALID
 
 
+def _cmd_receipt_verify_chain(args) -> int:
+    from sra_riskgate import verify_receipt_chain
+    try:
+        with open(args.file, encoding="utf-8") as fh:
+            text = fh.read()
+        try:
+            rows = json.loads(text)
+        except ValueError:
+            rows = [json.loads(line) for line in text.splitlines() if line.strip()]  # JSON Lines
+    except (OSError, ValueError) as e:
+        return _fail(f"cannot read {args.file}: {e}")
+    if isinstance(rows, dict):
+        rows = [rows]
+    rows = [r["receipt"] if isinstance(r, dict) and isinstance(r.get("receipt"), dict) else r for r in rows]
+    try:
+        res = verify_receipt_chain(rows, key=_key_from_env(args.key_env)) if args.key_env \
+            else verify_receipt_chain(rows, expected_signer=args.signer)
+    except Exception as e:
+        return _fail(str(e))
+    _out(args, {"valid": res.ok, "checked": res.checked, "bad_index": res.bad_index, "reason": res.reason},
+         f"VALID ✓  chain of {res.checked} receipts" if res.ok
+         else f"INVALID ✗  receipt {res.bad_index}: {res.reason}")
+    return 0 if res.ok else EXIT_INVALID
+
+
+def _cmd_bench(args) -> int:
+    from sra_riskgate.bench import GUARD_NOTES, GUARDS, CommandGuard, format_table, generate_cases, run_benchmark
+    cases = generate_cases(args.seed)
+    if args.cases_out:
+        with open(args.cases_out, "w", encoding="utf-8") as fh:
+            for c in cases:
+                fh.write(json.dumps(c) + "\n")
+    reports = {}
+    if args.guard_cmd:
+        try:
+            g = CommandGuard(args.guard_cmd)
+        except OSError as e:
+            return _fail(f"cannot start the guard command: {e}")
+        try:
+            reports["your guard"] = run_benchmark(g, cases=cases)
+        finally:
+            g.close()
+    names = list(GUARDS) if args.guard == "all" else [args.guard]
+    if not args.guard_cmd or args.guard != "all":
+        for n in names:
+            reports[n] = run_benchmark(GUARDS[n], cases=cases)
+    else:
+        for n in ("approve-all", "strict"):
+            reports[n] = run_benchmark(GUARDS[n], cases=cases)
+    if args.json:
+        print(json.dumps(reports, indent=2))
+    else:
+        print(f"{len(cases)} generated cases (seed {args.seed}): utility = legitimate payments approved, "
+              f"security = unsafe payments not approved\n")
+        print(format_table(reports))
+        print("\n" + "\n".join(f"  {n}: {GUARD_NOTES[n]}" for n in reports if n in GUARD_NOTES))
+        print("\nSynthetic cases in real attack shapes; see `python -m pydoc sra_riskgate.bench` for scope.")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sra-riskgate",
                                 description="The pre-sign firewall for AI agents that pay.")
@@ -146,6 +212,9 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--lookalike", choices=["standard", "strict"], default=None,
                    help="look-alike payee rule with --known: standard (7+ shared characters, default) or strict "
                         "(also 3 at each end)")
+    c.add_argument("--new-payee", choices=["hold", "allow"], default=None,
+                   help="with --known: hold a payee not in the list (default) or allow it (the look-alike check "
+                        "still applies)")
     c.add_argument("--policy", default=None, help="a policy file (JSON or YAML)")
     c.add_argument("--record", action="store_true",
                    help="count an approved payment against the policy's budgets (default: a dry run that "
@@ -167,6 +236,24 @@ def _parser() -> argparse.ArgumentParser:
     g.add_argument("--signer", metavar="ADDRESS", help="expected signer address for Ethereum receipts")
     rv.add_argument("--json", action="store_true")
     rv.set_defaults(func=_cmd_receipt_verify)
+
+    rc = rec.add_parser("verify-chain", help="verify a chain of receipts, oldest first (exit 0 valid, 1 invalid)")
+    rc.add_argument("file", help="a JSON array or JSON Lines file of receipts (or MCP tool results)")
+    g = rc.add_mutually_exclusive_group(required=True)
+    g.add_argument("--key-env", metavar="VAR", help="environment variable holding the HMAC key (hex or base64)")
+    g.add_argument("--signer", metavar="ADDRESS", help="expected signer address for Ethereum receipts")
+    rc.add_argument("--json", action="store_true")
+    rc.set_defaults(func=_cmd_receipt_verify_chain)
+
+    b = sub.add_parser("bench", help="utility vs security benchmark for payment guards (offline, deterministic)")
+    b.add_argument("--guard", default="all", choices=["all", "approve-all", "hold-new", "standard", "strict",
+                                                      "strict-hold-new"])
+    b.add_argument("--guard-cmd", default=None, metavar="COMMAND",
+                   help="score your own guard: it reads one JSON case per line and answers {\"decision\": ...}")
+    b.add_argument("--seed", type=int, default=1)
+    b.add_argument("--cases-out", default=None, metavar="FILE", help="also write the cases (with answers) as JSONL")
+    b.add_argument("--json", action="store_true")
+    b.set_defaults(func=_cmd_bench)
 
     ver = sub.add_parser("version", help="print the version")
     ver.set_defaults(func=lambda a: (print(__import__("sra_riskgate").__version__), 0)[1])

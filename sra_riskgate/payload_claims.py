@@ -138,3 +138,65 @@ def scan_payload_claims(payload: Any, rules: Iterable[str] = tuple(RULES)) -> Li
         if m:
             found.append(PayloadClaim(name, m.group(0)[:120]))
     return found
+
+
+# ---------------------------------------------------------------- payee-change requests (1.11.0+)
+
+PAYEE_CHANGE_FLAG = "PAYEE_CHANGE_REQUEST"
+
+PAYEE_CHANGE_RULES = {
+    "address_changed": re.compile(
+        r"\b(wallet|deposit|payment|payout|receiving|usdc|usdt|bank(ing)?|account)\s+(address|details|account|"
+        r"info(rmation)?|wallet)?\s*(has|have|was|were|is|are)\s+(now\s+|been\s+)?(changed|updated|moved|migrated|"
+        r"replaced|different)\b"
+        r"|\b(we|i)(\s+have|'ve)?\s+(changed|updated|moved|migrated|switched)\s+(our|my)\s+(wallet|address|account|"
+        r"payment\s+details|bank(ing)?\s+details|receiving\s+address)\b",
+        re.I),
+    "send_to_new_address": re.compile(
+        r"\b(send|pay|transfer|route|redirect|remit|forward)\b[^.\n]{0,40}\b(to\s+)?(our|my|this|the|a)\s+"
+        r"(new|updated|different|alternate|alternative|backup|replacement|temporary)\s+(wallet|address|account)\b",
+        re.I),
+    "stop_old_address": re.compile(
+        r"\b(do\s+not|don'?t|stop|no\s+longer)\s+(send|pay|use)(ing)?\b[^.\n]{0,40}\b(old|previous|usual|"
+        r"registered|former|current|existing)\s+(wallet|address|account)\b",
+        re.I),
+    "new_address_named": re.compile(
+        r"\b(new|updated|changed|replacement)\s+(wallet|deposit|payout|payment|receiving|usdc|usdt)\s+address\b",
+        re.I),
+}
+_ADDR_IN_TEXT = re.compile(r"(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])")
+
+
+def _token_contracts() -> set:
+    from sra_riskgate.chains import STABLECOINS
+    return {c.lower() for chains in STABLECOINS.values() for c, _ in chains.values()}
+
+
+def scan_payee_change(payload: Any, *, recipient: Any = None, sender: Any = None) -> List[PayloadClaim]:
+    """Return signs that the untrusted request asks to pay a new or different address (1.11.0+).
+
+    Catches the redirection pattern behind invoice fraud and many agent-to-agent scams: "our wallet address has
+    changed", "send it to our new address", "do not use the old address". With ``recipient`` given, an address
+    written in the request's text that is neither the recipient, the sender nor a listed stablecoin contract is
+    also reported (rule ``other_address_in_request``). A field that holds only an address is not text, so the
+    payee field of a structured request is never reported.
+    """
+    try:
+        values = text_values(payload)
+    except ValueError:
+        return [PayloadClaim(TOO_LARGE, f"more than {_MAX_STRINGS} text fields, or nested more than {_MAX_DEPTH} levels")]
+    text = normalize("\n".join(values))
+    found = []
+    for name, rx in PAYEE_CHANGE_RULES.items():
+        m = rx.search(text)
+        if m:
+            found.append(PayloadClaim(name, m.group(0)[:120]))
+    if isinstance(recipient, str):
+        mine = {recipient.lower()} | ({sender.lower()} if isinstance(sender, str) else set())
+        others = [a for a in _ADDR_IN_TEXT.findall(text) if a.lower() not in mine]
+        if others:
+            tokens = _token_contracts()
+            others = [a for a in others if a.lower() not in tokens]
+        if others:
+            found.append(PayloadClaim("other_address_in_request", others[0]))
+    return found

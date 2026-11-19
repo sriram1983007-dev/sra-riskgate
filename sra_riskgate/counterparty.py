@@ -40,6 +40,16 @@ LOOKALIKE_MIN_TOTAL = 7
 LOOKALIKE_CHECKS = {"standard": None, "strict": 6}  # None: LOOKALIKE_MIN_TOTAL
 
 
+NEW_COUNTERPARTY_MODES = ("hold", "allow")
+
+
+def parse_new_counterparty(value: object) -> str:
+    """Validate a ``new_counterparty`` setting (1.11.0+): "hold" (default) or "allow"."""
+    if not isinstance(value, str) or value not in NEW_COUNTERPARTY_MODES:
+        raise ValueError(f"new_counterparty must be 'hold' or 'allow', got {value!r}.")
+    return value
+
+
 def parse_lookalike_check(value: object) -> Optional[int]:
     """The minimum shared total for a ``lookalike_check`` setting; raises ValueError on anything else."""
     if not isinstance(value, str) or value not in LOOKALIKE_CHECKS:

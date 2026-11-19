@@ -97,6 +97,45 @@ Or run every check in your browser, nothing to install: [open the notebook in Co
 
 Walkthrough with more examples: [Stop your AI agent from signing an unlimited USDC approval](https://dev.to/sriram1983007/stop-your-ai-agent-from-signing-an-unlimited-usdc-approval-10c0) (DEV.to).
 
+## Components for agent-to-agent payments (1.11.0+)
+
+When agents pay agents, the payee, the amount and the reasons arrive in messages from the other side. Four
+pieces cover that, each usable on its own:
+
+- **Payee-change requests** (`PAYEE_CHANGE_REQUEST`, HOLD): "our wallet address has changed", "send it to our new
+  address", "do not use the old address", or an address in the request's text that is not the payee. This is the
+  redirection behind invoice fraud, aimed at an agent instead of a clerk. It runs on `untrusted_request`, next to
+  the self-approval check.
+- **New payees without blanket holds**: `new_counterparty="allow"` keeps the look-alike check
+  (`LOOKALIKE_RECIPIENT`, reject) against `known_recipients` but no longer holds every payee the agent has not paid
+  before, for agents that buy from many new services. In the policy file: `"new_counterparty": "allow"`; on the
+  command line: `--new-payee allow`.
+- **Chained receipts**: `issue_receipt(result, signer, previous=last_receipt)` (or `chain_start=True` for the first)
+  signs the SHA-256 of the previous receipt into the next, and `verify_receipt_chain(receipts, key=...)` (or
+  `sra-riskgate receipt verify-chain receipts.jsonl --key-env SRA_RECEIPT_KEY`) detects an edited, deleted,
+  inserted or reordered decision. It cannot see receipts cut off the end, so keep the latest `receipt_sha256`
+  somewhere else too.
+- **A utility vs security benchmark** for any guard, offline and deterministic: `sra-riskgate bench`. Utility is
+  the share of legitimate payments approved; security, the share of unsafe ones not approved. Score your own guard
+  or agent with `--guard-cmd "python my_guard.py"` (one JSON case per line in, one `{"decision": ...}` per line
+  out), or from Python with `sra_riskgate.bench.run_benchmark(guard)`.
+
+```
+$ sra-riskgate bench          # 560 generated cases, seed 1
+guard              utility  security  balanced  unsafe approved  legit blocked
+approve-all         100.0%      0.0%     50.0%              260              0
+hold-new             63.0%     88.5%     75.7%               30            111
+standard            100.0%     89.6%     94.8%               27              0
+strict              100.0%     91.1%     95.6%               23              0
+strict-hold-new      63.0%    100.0%     81.5%                0            111
+```
+
+The cases are generated in real attack shapes (look-alike prefix/suffix lengths from 179 real Ethereum attacks,
+redirection and self-approval text, sanctioned payees, over-limit amounts) with some deliberately subtle unsafe
+cases that keyword rules miss. The generator and this library's guards share an author, so read the library's
+rows as coverage of these patterns, not independent accuracy; real-world numbers are in the
+[real-world dataset](https://huggingface.co/datasets/sriram1983007/sra-real-world-poisoning).
+
 ## Command line (1.9.0+)
 
 ```bash

@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.11.0 — 2026-11-19
+
+### Added: components for agent-to-agent payments
+- **Payee-change requests**: an `untrusted_request` that asks to pay a new or different address ("our wallet
+  address has changed", "send it to our new address", "do not use the old address"), or whose text names an
+  address that is neither the payee, the sender nor a listed stablecoin contract, gives HOLD with
+  `PAYEE_CHANGE_REQUEST` and the matching rule (`address_changed`, `send_to_new_address`, `stop_old_address`,
+  `new_address_named`, `other_address_in_request`). `payload_claims.scan_payee_change()` exposes it on its own.
+- **`new_counterparty="allow"`**: keeps the look-alike check against `known_recipients` without holding every new
+  payee (default `"hold"`, unchanged). On every `check_*` function, in the policy file and as `--new-payee` on the
+  command line; with the policy setting too, the flag is an error.
+- **Chained receipts**: `issue_receipt(..., previous=...)` / `chain_start=True` sign a `prev_sha256` link;
+  `verify_receipt_chain()` and `sra-riskgate receipt verify-chain` detect edited, deleted, inserted or reordered
+  receipts; `receipt_sha256()` gives the link value. Receipts issued without these arguments are unchanged.
+- **`sra-riskgate bench`** and `sra_riskgate.bench`: an offline, deterministic utility vs security benchmark for
+  any payment guard, with built-in baselines and an external-command interface (JSON Lines).
+
+### Changed
+- An `untrusted_request` with a payee-change request is now held where it was approved before. No other decision
+  changes: the defaults for `new_counterparty` and `lookalike_check` are unchanged.
+
 ## 1.10.1 — 2026-11-18
 
 ### Fixed (Audit #19/#20)

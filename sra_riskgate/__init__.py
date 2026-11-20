@@ -19,6 +19,9 @@ from .settlement import SettlementCheck, verify_gateway_balances, verify_settlem
 from .spend import SpendGuard, SpendLedger
 from .receipts import ReceiptSigner, issue_receipt, receipt_sha256, verify_receipt, verify_receipt_chain
 from .policy import Policy, load_policy
+from .session import PaymentSession
+from .report import audit_report, audit_report_markdown
+from .threats import threats_for
 
 __all__ = [
     "RiskGate",
@@ -81,5 +84,9 @@ __all__ = [
     "verify_receipt",
     "Policy",
     "load_policy",
+    "PaymentSession",
+    "audit_report",
+    "audit_report_markdown",
+    "threats_for",
 ]
-__version__ = "1.11.0"
+__version__ = "1.12.0"

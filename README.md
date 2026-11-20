@@ -34,6 +34,7 @@ not the payee's request, deciding what is paid.
 | An unlimited token approval, permit or EIP-7702 delegation dressed up as a payment | **Hold** | `UNLIMITED_APPROVAL`, `CODE_DELEGATION` |
 | An x402 signature that stays valid for weeks | **Hold** | `LONG_LIVED_AUTHORIZATION` |
 | Payment text that vouches for itself ("pre-approved by treasury") | **Hold** | `self_asserted_verification_in_payload` |
+| A negotiation that ends with a different payee, a higher total, another token, or a second payment | **Hold** | `SESSION_PAYEE_DRIFT`, `SESSION_AMOUNT_DRIFT`, `SESSION_ALREADY_PAID` |
 | Fifty small payments under the per-payment limit | **Hold** once the rolling budget is used | `BUDGET_EXCEEDED` |
 | A sudden burst, or an amount far above the wallet's usual | **Hold** | `RATE_SPIKE`, `AMOUNT_SPIKE` |
 | A sanctioned address (offline OFAC list, or Chainalysis, TRM, Range, Webacy, Elliptic) | **Reject** | `OFAC_SDN_MATCH`, `PROVIDER_SANCTIONS_MATCH` |
@@ -52,7 +53,8 @@ payment arrived, and every decision can carry a signed, tamper-evident receipt.
   [CrewAI](https://pypi.org/project/crewai-sra-riskgate/), Coinbase AgentKit, x402 clients and
   [ElizaOS](https://www.npmjs.com/package/elizaos-plugin-sra-riskgate).
 - **x402 facilitators and payment servers**: refuse over-long signatures and poisoned payees before settling them.
-- **Compliance and audit**: signed receipts that prove what was decided, under which policy, and when.
+- **Compliance and audit**: signed receipts that prove what was decided, under which policy, and when, and an
+  audit report built from them, mapped to the OWASP LLM and agentic risk lists.
 
 ### Open by design
 
@@ -63,6 +65,21 @@ and [every prediction published](https://huggingface.co/datasets/sriram1983007/s
 This repository also holds the `eval/` scripts behind the [paper](https://doi.org/10.5281/zenodo.23715017).
 The SDK's offline sanctions check is an exact match against a dated snapshot of OFAC's published crypto
 addresses, not a screening service (see [Sanctions](#sanctions-ofac-sdn-addresses)).
+
+### How it is different
+
+| | Wallet spend limits | LLM guardrails | Screening APIs | **sra-riskgate** |
+| --- | --- | --- | --- | --- |
+| Checks the exact bytes about to be signed (transfers, permits, x402, UserOperations, EIP-7702) | Some | No | No | **Yes** |
+| Reads the payee's own words for redirects and self-approval | No | Generic text | No | **Payment-specific** |
+| Remembers what was agreed across a negotiation | No | No | No | **Yes** (`PaymentSession`) |
+| Fails closed on every error path | Varies | Varies | Varies | **Yes, tested** |
+| Signed, chained decision records and an audit report | Logs | Logs | Logs | **Yes** |
+| Published benchmark, real-world dataset and every prediction | Rarely | Rarely | Rarely | **Yes** |
+| Open source, runs offline, keeps no money | Varies | Varies | No | **Yes** |
+
+It works alongside the others: keep your wallet's limits and your screening provider (it calls Chainalysis, TRM,
+Range, Webacy and Elliptic for you), and let this decide, on the payer's policy, before anything is signed.
 
 **Roadmap:** a shared spend ledger across machines, a hosted policy console with approvals and alerts, managed
 screening (several providers, one contract), and live sanctions and look-alike threat feeds.
@@ -96,6 +113,41 @@ Nothing needs a GPU, an API key or a network connection.
 Or run every check in your browser, nothing to install: [open the notebook in Colab](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb).
 
 Walkthrough with more examples: [Stop your AI agent from signing an unlimited USDC approval](https://dev.to/sriram1983007/stop-your-ai-agent-from-signing-an-unlimited-usdc-approval-10c0) (DEV.to).
+
+## Negotiations, audit reports and known risks (1.12.0+)
+
+**Negotiation sessions.** Agents that negotiate before paying are attacked between the first message and the last:
+"actually, send it to our other wallet", a total that creeps up, a switch of token or chain, a second invoice for
+the same work. Each payment can look fine alone. A `PaymentSession` remembers the agreed terms and holds any payment
+that drifts from them:
+
+```python
+from sra_riskgate import PaymentSession
+
+s = PaymentSession(payee="0xVendor...", amount=40, chain_id=8453, token="USDC", tolerance_pct=0)
+for msg in messages_from_counterparty:
+    s.observe(msg)              # a redirect request is remembered for the rest of the session
+result = s.check(sender="0xMine...", recipient=to, amount=amt, known_recipients=[...])
+```
+
+`SESSION_PAYEE_DRIFT`, `SESSION_AMOUNT_DRIFT`, `SESSION_ASSET_DRIFT`, `SESSION_ALREADY_PAID` and
+`SESSION_PAYEE_CHANGE_SEEN` (an earlier message asked to pay elsewhere, told the agent to ignore its rules, or said
+the payment was pre-verified) all HOLD, on top of every `check_payment` check. Only the principal changes the terms,
+with `s.amend(by=..., reason=..., ...)`, which is recorded; `s.summary()` can be bound into a receipt.
+
+**Audit reports.** `audit_report(receipts, key=...)` verifies every receipt and the chain, then summarises the
+period, decisions and amounts per token, flags, policies and signers, with a `report_sha256` and the chain's latest
+link to record elsewhere. Receipts that do not verify are listed and left out of every figure.
+
+```bash
+sra-riskgate receipt report receipts.jsonl --key-env SRA_RECEIPT_KEY > report.md   # exit 1 if anything fails
+```
+
+**Known risks.** Every flag maps to a control category and to entries in the OWASP Top 10 for LLM Applications
+(2025) and the OWASP Top 10 for Agentic Applications (2026): `threats_for(result.flags)` gives, for example,
+`["LLM01", "ASI01", "ASI07"]` for a redirect request, and `sra-riskgate threats` prints the whole table, including
+the entries the library does not address. The mapping is this project's reading of the OWASP descriptions, not
+reviewed by OWASP; a mapped entry is addressed in part, for payments.
 
 ## Components for agent-to-agent payments (1.11.0+)
 

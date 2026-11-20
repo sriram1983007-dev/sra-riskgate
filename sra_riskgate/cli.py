@@ -6,6 +6,8 @@
     sra-riskgate receipt verify receipt.json --key-env SRA_RECEIPT_KEY      # HMAC receipts
     sra-riskgate receipt verify receipt.json --signer 0xYourReceiptAddress  # Ethereum receipts
     sra-riskgate receipt verify-chain receipts.jsonl --key-env SRA_RECEIPT_KEY  # a chain, oldest first
+    sra-riskgate receipt report receipts.jsonl --key-env SRA_RECEIPT_KEY [--json]  # audit report (Markdown)
+    sra-riskgate threats [--json]                                           # flags mapped to OWASP risks
     sra-riskgate bench [--guard strict] [--json]                            # utility vs security benchmark
     sra-riskgate version
 
@@ -13,6 +15,7 @@ Exit codes, so a CI pipeline or a shell script can act on the result:
     check            0 approve, 10 hold, 20 reject
     policy validate  0 valid, 1 invalid
     receipt verify   0 valid, 1 invalid
+    receipt report   0 every receipt verified (and the chain is intact), 1 otherwise
     any command      2 bad usage (argparse), 3 a file or setting could not be read
 """
 from __future__ import annotations
@@ -132,20 +135,24 @@ def _cmd_receipt_verify(args) -> int:
     return 0 if ok else EXIT_INVALID
 
 
+def _read_receipts(path: str) -> list:
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        rows = json.loads(text)
+    except ValueError:
+        rows = [json.loads(line) for line in text.splitlines() if line.strip()]  # JSON Lines
+    if isinstance(rows, dict):
+        rows = [rows]
+    return [r["receipt"] if isinstance(r, dict) and isinstance(r.get("receipt"), dict) else r for r in rows]
+
+
 def _cmd_receipt_verify_chain(args) -> int:
     from sra_riskgate import verify_receipt_chain
     try:
-        with open(args.file, encoding="utf-8") as fh:
-            text = fh.read()
-        try:
-            rows = json.loads(text)
-        except ValueError:
-            rows = [json.loads(line) for line in text.splitlines() if line.strip()]  # JSON Lines
+        rows = _read_receipts(args.file)
     except (OSError, ValueError) as e:
         return _fail(f"cannot read {args.file}: {e}")
-    if isinstance(rows, dict):
-        rows = [rows]
-    rows = [r["receipt"] if isinstance(r, dict) and isinstance(r.get("receipt"), dict) else r for r in rows]
     try:
         res = verify_receipt_chain(rows, key=_key_from_env(args.key_env)) if args.key_env \
             else verify_receipt_chain(rows, expected_signer=args.signer)
@@ -155,6 +162,33 @@ def _cmd_receipt_verify_chain(args) -> int:
          f"VALID ✓  chain of {res.checked} receipts" if res.ok
          else f"INVALID ✗  receipt {res.bad_index}: {res.reason}")
     return 0 if res.ok else EXIT_INVALID
+
+
+def _cmd_receipt_report(args) -> int:
+    from sra_riskgate import audit_report, audit_report_markdown
+    try:
+        rows = _read_receipts(args.file)
+    except (OSError, ValueError) as e:
+        return _fail(f"cannot read {args.file}: {e}")
+    try:
+        rep = audit_report(rows, key=_key_from_env(args.key_env)) if args.key_env \
+            else audit_report(rows, expected_signer=args.signer)
+    except Exception as e:
+        return _fail(str(e))
+    _out(args, rep, audit_report_markdown(rep))
+    ch = rep["chain"]
+    ok = rep["receipts"] > 0 and rep["invalid"] == 0 and (not ch["chained"] or ch["intact"])
+    return 0 if ok else EXIT_INVALID
+
+
+def _cmd_threats(args) -> int:
+    from sra_riskgate.threats import THREATS, coverage
+    cov = coverage()
+    data = {t: {"name": THREATS[t][0], "source": THREATS[t][1], "flags": cov[t]} for t in THREATS}
+    text = "\n".join(f"{t}  {THREATS[t][0]:<38} " + (", ".join(cov[t]) if cov[t] else "(not addressed)")
+                     for t in THREATS)
+    _out(args, data, text + "\n\nThis project's mapping of its flags to OWASP entries; OWASP has not reviewed it.")
+    return 0
 
 
 def _cmd_bench(args) -> int:
@@ -244,6 +278,18 @@ def _parser() -> argparse.ArgumentParser:
     g.add_argument("--signer", metavar="ADDRESS", help="expected signer address for Ethereum receipts")
     rc.add_argument("--json", action="store_true")
     rc.set_defaults(func=_cmd_receipt_verify_chain)
+
+    rr = rec.add_parser("report", help="audit report from receipts (exit 0 all verified, 1 otherwise)")
+    rr.add_argument("file", help="a JSON array or JSON Lines file of receipts (or MCP tool results), oldest first")
+    g = rr.add_mutually_exclusive_group(required=True)
+    g.add_argument("--key-env", metavar="VAR", help="environment variable holding the HMAC key (hex or base64)")
+    g.add_argument("--signer", metavar="ADDRESS", help="expected signer address for Ethereum receipts")
+    rr.add_argument("--json", action="store_true")
+    rr.set_defaults(func=_cmd_receipt_report)
+
+    th = sub.add_parser("threats", help="which OWASP LLM and agentic risks each flag addresses")
+    th.add_argument("--json", action="store_true")
+    th.set_defaults(func=_cmd_threats)
 
     b = sub.add_parser("bench", help="utility vs security benchmark for payment guards (offline, deterministic)")
     b.add_argument("--guard", default="all", choices=["all", "approve-all", "hold-new", "standard", "strict",

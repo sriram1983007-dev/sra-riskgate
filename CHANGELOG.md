@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.12.0 — 2026-11-20
+
+### Added: negotiation safety and verifiable reporting
+- **`PaymentSession`**: the agreed payee, amount, token and chain of one negotiation. `check()` runs
+  `check_payment` and holds a payment that drifts from the terms (`SESSION_PAYEE_DRIFT`, `SESSION_AMOUNT_DRIFT`,
+  `SESSION_ASSET_DRIFT`), repeats one already paid (`SESSION_ALREADY_PAID`), or follows an earlier counterparty
+  message asking to pay elsewhere, to ignore the agent's rules, or claiming pre-verification
+  (`SESSION_PAYEE_CHANGE_SEEN`, sticky). `observe()`, `amend(by=, reason=)`, `close()`, `release()`, `summary()`.
+- **`audit_report()` / `audit_report_markdown()`** and `sra-riskgate receipt report`: verify receipts and the chain,
+  and summarise period, decisions, amounts per token, flags, policies, signers and OWASP risks, with a
+  deterministic `report_sha256`. Invalid receipts are listed and excluded from every figure.
+- **`sra_riskgate.threats`**, `threats_for()` and `sra-riskgate threats`: every flag the library emits mapped to a
+  control category and to OWASP Top 10 for LLM Applications 2025 / Agentic Applications 2026 entries (this
+  project's mapping, not reviewed by OWASP). A test fails if a new flag is added without a category.
+
+### Changed
+- No existing decision changes.
+
 ## 1.11.0 — 2026-11-19
 
 ### Added: components for agent-to-agent payments

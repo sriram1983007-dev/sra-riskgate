@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sra-riskgate"
-version = "1.11.0"
+version = "1.12.0"
 description = "The pre-sign firewall for AI agents that pay: fail-closed checks, spend budgets, signed receipts and one policy file for stablecoin and x402 payments (USDC, USDT, USDB, USDG)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "Sriram Ramakrishnan" }]
 dependencies = ["pydantic>=2.0"]
-keywords = ["stablecoin", "usdc", "usdt", "usdg", "usdb", "tether", "paxos", "bridge", "robinhood-chain", "permit", "allowance", "payments", "x402", "ai-agents", "agent-safety", "guardrails", "llm", "mcp", "langchain", "crewai", "agentkit", "erc20", "eip-3009", "eip-712", "eip-7702", "address-poisoning", "base", "arc", "circle", "circle-gateway", "circle-wallets", "nanopayments", "settlement", "receipts", "spend-limits", "budgets", "audit-trail", "policy-as-code", "firewall", "ofac", "sanctions", "compliance", "risk", "fintech"]
+keywords = ["stablecoin", "usdc", "usdt", "usdg", "usdb", "tether", "paxos", "bridge", "robinhood-chain", "permit", "allowance", "payments", "x402", "ai-agents", "agent-safety", "guardrails", "llm", "mcp", "langchain", "crewai", "agentkit", "erc20", "eip-3009", "eip-712", "eip-7702", "address-poisoning", "base", "arc", "circle", "circle-gateway", "circle-wallets", "nanopayments", "settlement", "receipts", "spend-limits", "budgets", "audit-trail", "audit-report", "owasp", "owasp-llm-top-10", "agent-negotiation", "policy-as-code", "firewall", "ofac", "sanctions", "compliance", "risk", "fintech"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",

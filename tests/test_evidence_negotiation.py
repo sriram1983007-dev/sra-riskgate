@@ -102,7 +102,8 @@ def _emitted_flags():
     src = "\n".join(p.read_text() for p in Path("sra_riskgate").glob("*.py") if p.name not in {"threats.py", "cli.py"})
     names = set(re.findall(r'"([A-Z][A-Z0-9_]{5,})"', src))
     not_flags = {"STABLECOINS", "GUARDS", "DEFAULT_COUNTS", "ELLIPTIC_SECRET", "ELLIPTIC_KEY", "CHAINALYSIS_API_KEY",
-                 "PAYMENT_SYSTEM_PROMPT", "DISPUTE_SYSTEM_PROMPT", "BLOCKED", "ADDRESS", "COMMAND"}
+                 "PAYMENT_SYSTEM_PROMPT", "DISPUTE_SYSTEM_PROMPT", "BLOCKED", "ADDRESS", "COMMAND",
+                 "DEMO_RECEIPT_KEY", "TRANSFER_TOPIC"}
     return names - not_flags
 
 

@@ -9,6 +9,9 @@
     sra-riskgate receipt report receipts.jsonl --key-env SRA_RECEIPT_KEY [--json]  # audit report (Markdown)
     sra-riskgate threats [--json]                                           # flags mapped to OWASP risks
     sra-riskgate bench [--guard strict] [--json]                            # utility vs security benchmark
+    sra-riskgate evidence build --out evidence/ [--receipts FILE --key-env VAR] [--tests tests/] [--zip]
+    sra-riskgate evidence verify evidence/                                  # nothing edited since it was built
+    sra-riskgate scan 0xWallet --rpc URL [--write-policy FILE]             # look-alikes already targeting a wallet
     sra-riskgate version
 
 Exit codes, so a CI pipeline or a shell script can act on the result:
@@ -16,6 +19,9 @@ Exit codes, so a CI pipeline or a shell script can act on the result:
     policy validate  0 valid, 1 invalid
     receipt verify   0 valid, 1 invalid
     receipt report   0 every receipt verified (and the chain is intact), 1 otherwise
+    evidence build   0 self-check passed (and receipts verified, tests passed, if given), 1 otherwise
+    evidence verify  0 every file unchanged, 1 otherwise
+    scan             0 nothing found, 10 look-alikes found, 1 nothing found but the range was not fully read
     any command      2 bad usage (argparse), 3 a file or setting could not be read
 """
 from __future__ import annotations
@@ -205,16 +211,16 @@ def _cmd_bench(args) -> int:
         except OSError as e:
             return _fail(f"cannot start the guard command: {e}")
         try:
-            reports["your guard"] = run_benchmark(g, cases=cases)
+            reports["your guard"] = run_benchmark(g, seed=args.seed, cases=cases)
         finally:
             g.close()
     names = list(GUARDS) if args.guard == "all" else [args.guard]
     if not args.guard_cmd or args.guard != "all":
         for n in names:
-            reports[n] = run_benchmark(GUARDS[n], cases=cases)
+            reports[n] = run_benchmark(GUARDS[n], seed=args.seed, cases=cases)
     else:
         for n in ("approve-all", "strict"):
-            reports[n] = run_benchmark(GUARDS[n], cases=cases)
+            reports[n] = run_benchmark(GUARDS[n], seed=args.seed, cases=cases)
     if args.json:
         print(json.dumps(reports, indent=2))
     else:
@@ -224,6 +230,95 @@ def _cmd_bench(args) -> int:
         print("\n" + "\n".join(f"  {n}: {GUARD_NOTES[n]}" for n in reports if n in GUARD_NOTES))
         print("\nSynthetic cases in real attack shapes; see `python -m pydoc sra_riskgate.bench` for scope.")
     return 0
+
+
+def _cmd_evidence_build(args) -> int:
+    from sra_riskgate.evidence import build_evidence_pack
+    kw = {}
+    if args.receipts:
+        if not (args.key_env or args.signer):
+            return _fail("--receipts needs --key-env or --signer to verify them")
+        try:
+            kw["receipts"] = _read_receipts(args.receipts)
+            kw.update({"key": _key_from_env(args.key_env)} if args.key_env else {"expected_signer": args.signer})
+        except (OSError, ValueError) as e:
+            return _fail(f"cannot read {args.receipts}: {e}")
+    elif args.key_env or args.signer:
+        return _fail("--key-env and --signer go with --receipts")
+    try:
+        m = build_evidence_pack(args.out, policy=args.policy, seed=args.seed, tests=args.tests,
+                                make_zip=args.zip, **kw)
+    except (OSError, ValueError) as e:
+        return _fail(str(e))
+    s = m["summary"]
+    lines = [("READY ✓  " if m["ok"] else "PROBLEMS ✗  ") + str(args.out),
+             f"  self-check: {s['selfcheck']['total'] - s['selfcheck']['failed']} of {s['selfcheck']['total']} passed",
+             f"  bench (strict): utility {s['bench']['strict']['utility']:.1%}, "
+             f"security {s['bench']['strict']['security']:.1%}",
+             f"  OWASP entries addressed: {s['threats']['addressed']} of {s['threats']['total']}",
+             f"  audit report: {s['audit']['verified']} of {s['audit']['receipts']} receipts verified"
+             + (" (demo chain)" if m["demo_audit_report"] else "")]
+    if "tests" in s:
+        lines.append(f"  tests: {s['tests'].get('summary') or s['tests'].get('error')}")
+    lines.append(f"  pack_sha256: {m['pack_sha256']}")
+    if m.get("zip"):
+        lines.append(f"  zip: {m['zip']}")
+    _out(args, m, "\n".join(lines))
+    return 0 if m["ok"] else EXIT_INVALID
+
+
+def _cmd_evidence_verify(args) -> int:
+    from sra_riskgate.evidence import verify_evidence_pack
+    r = verify_evidence_pack(args.path)
+    _out(args, r, (f"VALID ✓  {args.path}: every file unchanged ({r['library']}, built {r['built_at']})\n"
+                   f"  pack_sha256: {r['pack_sha256']}") if r["ok"]
+         else f"INVALID ✗  {args.path}\n" + "\n".join(f"  {x}" for x in r["problems"]))
+    return 0 if r["ok"] else EXIT_INVALID
+
+
+def _cmd_scan(args) -> int:
+    from sra_riskgate.scan import ScanError, scan_policy, scan_wallet
+    url = args.rpc or os.environ.get("SRA_RPC_URL")
+    if not url:
+        return _fail("give --rpc URL or set SRA_RPC_URL (any JSON-RPC endpoint for the wallet's chain)")
+    known = None
+    if args.known:
+        try:
+            with open(args.known, encoding="utf-8") as fh:
+                known = [x.strip() for x in fh if x.strip() and not x.lstrip().startswith("#")]
+        except OSError as e:
+            return _fail(f"cannot read {args.known}: {e}")
+    try:
+        r = scan_wallet(args.wallet, rpc_url=url, blocks=args.blocks, from_block=args.from_block,
+                        known_payees=known, lookalike_check=args.lookalike_check, max_requests=args.max_requests)
+    except (ScanError, ValueError) as e:
+        return _fail(str(e))
+    if args.write_policy:
+        try:
+            with open(args.write_policy, "w", encoding="utf-8") as fh:
+                json.dump(scan_policy(r, include_payees=args.include_payees), fh, indent=2)
+                fh.write("\n")
+        except OSError as e:
+            return _fail(f"cannot write {args.write_policy}: {e}")
+    found = bool(r["findings"] or r["suspicious_payees"])
+    head = (f"FOUND {len(r['findings'])} look-alike(s) targeting {r['wallet']}" if found
+            else f"CLEAN  no look-alikes of your payees in {r['wallet']}'s history")
+    lines = [head, f"  chain {r['chain_id']}, blocks {r['from_block']}-{r['to_block']}, {r['payees']} payees, "
+                   f"{r['events_checked']} other transfers checked ({r['lookalike_check']} rule)"]
+    for f in r["findings"]:
+        lines.append(f"  {f['address']}  imitates {f['imitates']}  ({f['shared_prefix']}+{f['shared_suffix']} "
+                     f"characters, {', '.join(f['kinds'])}, {len(f['transactions'])} tx)")
+    for s in r["suspicious_payees"]:
+        a, b = s["addresses"]
+        lines.append(f"  PAID BOTH {a} and {b}: one may be a poisoned copy, confirm both before paying again")
+    if not r["complete"]:
+        lines.append(f"  INCOMPLETE: stopped at block {r['stopped_at_block']}; raise --max-requests or narrow --blocks")
+    if args.write_policy:
+        lines.append(f"  policy written: {args.write_policy} (sra-riskgate policy validate {args.write_policy})")
+    _out(args, r, "\n".join(lines))
+    if found:
+        return EXIT_HOLD
+    return 0 if r["complete"] else EXIT_INVALID
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -300,6 +395,43 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--cases-out", default=None, metavar="FILE", help="also write the cases (with answers) as JSONL")
     b.add_argument("--json", action="store_true")
     b.set_defaults(func=_cmd_bench)
+
+    ev = sub.add_parser("evidence", help="evidence packs for grant assessors, auditors and security reviewers"
+                        ).add_subparsers(dest="action", required=True)
+    eb = ev.add_parser("build", help="write an evidence pack (exit 0 ready, 1 a check failed)")
+    eb.add_argument("--out", required=True, metavar="DIR", help="an empty or new folder")
+    eb.add_argument("--receipts", default=None, metavar="FILE",
+                    help="your receipts (JSON array or JSON Lines, oldest first) for the audit report; "
+                         "without it a labelled demo chain is used")
+    g = eb.add_mutually_exclusive_group()
+    g.add_argument("--key-env", metavar="VAR", help="environment variable holding the HMAC key (hex or base64)")
+    g.add_argument("--signer", metavar="ADDRESS", help="expected signer address for Ethereum receipts")
+    eb.add_argument("--policy", default=None, metavar="FILE", help="record a policy's name, hash and settings used")
+    eb.add_argument("--tests", default=None, metavar="DIR", help="also run pytest on this folder and record it")
+    eb.add_argument("--seed", type=int, default=1, help="benchmark seed (default 1)")
+    eb.add_argument("--zip", action="store_true", help="also write DIR.zip")
+    eb.add_argument("--json", action="store_true", help="print the manifest as JSON")
+    eb.set_defaults(func=_cmd_evidence_build)
+    evv = ev.add_parser("verify", help="check a pack is unchanged (exit 0 valid, 1 invalid)")
+    evv.add_argument("path", help="the pack folder or its .zip")
+    evv.add_argument("--json", action="store_true")
+    evv.set_defaults(func=_cmd_evidence_verify)
+
+    sc = sub.add_parser("scan", help="find look-alike addresses already planted in a wallet's history "
+                                     "(exit 0 clean, 10 found, 1 incomplete)")
+    sc.add_argument("wallet", help="the wallet address to scan")
+    sc.add_argument("--rpc", default=None, metavar="URL", help="JSON-RPC endpoint for the chain (or SRA_RPC_URL)")
+    sc.add_argument("--blocks", type=int, default=200_000, help="how many recent blocks to read (default 200000)")
+    sc.add_argument("--from-block", type=int, default=None, help="read from this block instead of --blocks")
+    sc.add_argument("--known", default=None, metavar="FILE", help="extra payees, one address per line")
+    sc.add_argument("--lookalike-check", choices=["strict", "standard"], default="strict")
+    sc.add_argument("--max-requests", type=int, default=1000, help="RPC request budget (default 1000)")
+    sc.add_argument("--write-policy", default=None, metavar="FILE",
+                    help="write a policy file blocking every look-alike found")
+    sc.add_argument("--include-payees", action="store_true",
+                    help="with --write-policy, also list the payees found as known_recipients")
+    sc.add_argument("--json", action="store_true")
+    sc.set_defaults(func=_cmd_scan)
 
     ver = sub.add_parser("version", help="print the version")
     ver.set_defaults(func=lambda a: (print(__import__("sra_riskgate").__version__), 0)[1])

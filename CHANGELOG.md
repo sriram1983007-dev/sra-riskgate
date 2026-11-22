@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.14.0 — 2026-11-21
+
+### Added: poisoning scan
+- **`sra-riskgate scan 0xWallet --rpc URL`** and `scan_wallet()`: reads a wallet's ERC-20 `Transfer` history over
+  standard JSON-RPC (`eth_chainId`, `eth_blockNumber`, `eth_getLogs`) and reports every address that imitates one of
+  the wallet's payees, labelled `zero_value_transfer`, `fake_token` or `dust_received`, with its transactions and
+  explorer links. Payees are inferred from non-zero stablecoin payments, plus `--known FILE`. Strict look-alike
+  rule by default; every attack shape among the 179 real attacks in the public real-world dataset is found.
+  Also lists payees the wallet has paid that look like each other (`suspicious_payees`): one may be a poisoned copy.
+- **`--write-policy FILE`** / `scan_policy()`: a policy blocking every look-alike found (`--include-payees` also
+  writes the payees as `known_recipients`).
+- Halves its block range when a provider limits it, stops at a request budget (`--max-requests`) and reports
+  `complete: false` instead of a clean result it did not earn. Exit 0 clean, 10 found, 1 incomplete, 3 error.
+  `SRA_RPC_URL` can replace `--rpc`.
+
+### Fixed
+- `evidence build --zip` named the zip after the folder with its last dotted part replaced (`pack-1.13.0` gave
+  `pack-1.13.zip`); it is now `pack-1.13.0.zip`.
+- `evidence verify` on a path that does not exist now says "not found".
+- README: the model figures now show v2 (unsafe approvals 0.35%, dispute accuracy 90.2%) next to v1; 1.13.0's
+  grant section quoted v1's 0.47%.
+
+### Changed
+- No decision changes.
+
+## 1.13.0 — 2026-11-20
+
+### Added: evidence packs for grant assessors, auditors and security reviewers
+- **`sra-riskgate evidence build --out DIR`** and `build_evidence_pack()`: one folder, built offline from the
+  installed library, with a `README.md` for a reader with no context; a known-answer self-check (`selfcheck.json`);
+  the benchmark for every guard and baseline with every case and answer (`bench.*`, `bench_cases.jsonl`); the
+  OWASP LLM 2025 / Agentic 2026 coverage including the entries not addressed (`threats.*`); an audit report from
+  your receipts (`--receipts` with `--key-env` or `--signer`) or from a labelled demo chain signed with a published
+  key (`DEMO_RECEIPT_KEY`), so anyone can reproduce its `report_sha256`; optional pytest results (`--tests`) and
+  policy summary (`--policy`: name, hash and settings used, never addresses); `environment.json` with a SHA-256 of
+  every source file (`code_sha256`); and `MANIFEST.json` with every file's SHA-256 and `pack_sha256`. `--zip` also
+  writes `DIR.zip`. Exit 1 if the self-check fails, a supplied receipt does not verify or the tests fail.
+- **`sra-riskgate evidence verify DIR|DIR.zip`** and `verify_evidence_pack()`: every listed file present and
+  unchanged, nothing added, `pack_sha256` consistent.
+- README: a section for grant reviewers and funders (the problem, measured results with their sources and limits,
+  how to check them, and the milestones funding would deliver), and a section on evidence packs.
+
+### Fixed
+- `sra-riskgate bench --seed N` reported `"seed": 1` in its output for every seed; the scores were already
+  computed on seed `N`.
+
+### Changed
+- No decision changes.
+
 ## 1.12.0 — 2026-11-20
 
 ### Added: negotiation safety and verifiable reporting

@@ -22,6 +22,8 @@ from .policy import Policy, load_policy
 from .session import PaymentSession
 from .report import audit_report, audit_report_markdown
 from .threats import threats_for
+from .evidence import build_evidence_pack, verify_evidence_pack
+from .scan import scan_wallet, scan_policy, ScanError
 
 __all__ = [
     "RiskGate",
@@ -88,5 +90,10 @@ __all__ = [
     "audit_report",
     "audit_report_markdown",
     "threats_for",
+    "build_evidence_pack",
+    "verify_evidence_pack",
+    "scan_wallet",
+    "scan_policy",
+    "ScanError",
 ]
-__version__ = "1.12.0"
+__version__ = "1.14.0"

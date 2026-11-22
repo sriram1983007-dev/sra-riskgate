@@ -55,6 +55,10 @@ payment arrived, and every decision can carry a signed, tamper-evident receipt.
 - **x402 facilitators and payment servers**: refuse over-long signatures and poisoned payees before settling them.
 - **Compliance and audit**: signed receipts that prove what was decided, under which policy, and when, and an
   audit report built from them, mapped to the OWASP LLM and agentic risk lists.
+- **Wallet owners and treasury teams**: a [poisoning scan](#poisoning-scan-who-is-already-targeting-your-wallet-1140)
+  that finds the look-alike addresses already planted in a wallet's history and blocks them.
+- **Grant assessors and security reviewers**: one command builds a verifiable
+  [evidence pack](#evidence-packs-for-grant-assessors-and-auditors-1130) to check every claim offline.
 
 ### Open by design
 
@@ -86,6 +90,45 @@ screening (several providers, one contract), and live sanctions and look-alike t
 **Building agents that move money?** [Become a design partner](https://github.com/sriram1983007-dev/sra-riskgate/issues/new?title=Design%20partner%3A%20&body=Who%20you%20are%2C%20what%20your%20agents%20pay%20for%2C%20and%20which%20rails%20you%20use%3A)
 and shape what comes next.
 
+### For grant reviewers and funders
+
+**The problem is shared, and so is the fix.** Every team that lets an AI agent pay in stablecoins faces the same
+attacks: poisoned look-alike payees, "our wallet has changed" redirects, requests that approve themselves, unlimited
+approvals. Payments are final, so one miss is a permanent loss. sra-riskgate is the open, offline check that any
+wallet, framework or facilitator can run before signing, with no account, no fee and no custody.
+
+**Check our claims yourself, in one minute, offline:**
+
+```bash
+pip install sra-riskgate
+sra-riskgate evidence build --out evidence/ --zip    # self-check, benchmark, OWASP map, audit report, code hash
+sra-riskgate evidence verify evidence.zip            # confirms no file changed after it was built
+```
+
+| Evidence | Result | Where it comes from |
+| --- | --- | --- |
+| Real address-poisoning attacks rejected (standard rule) | 171 of 179, covering $3,326,190 of the $3,327,006 those 179 attacks took (the other 8 are held as new payees) | [90 days of real Ethereum USDC/USDT payments](https://huggingface.co/datasets/sriram1983007/sra-real-world-poisoning) |
+| Normal payments wrongly rejected (strict rule) | 0 of 4,967 | same dataset |
+| Benchmark, strict guard, 560 cases | 100% of legitimate payments approved, 91.1% of unsafe ones stopped; approve-all stops 0% | `sra-riskgate bench` (synthetic, same author: coverage, not independent accuracy) |
+| Unsafe approvals by the optional 4B model (v2) | 3 of 847 risky payments (0.35%), against 34.6% for its base model | [every prediction published](https://huggingface.co/datasets/sriram1983007/sra-bench-results) |
+| OWASP LLM 2025 and Agentic 2026 entries addressed in part | 13 of 20, with the 7 it does not address listed | `sra-riskgate threats` (this project's mapping, not reviewed by OWASP) |
+| Tests | about 1,100, run before every release | `pytest -q` |
+
+Everything is open: the library, the [MCP server](https://pypi.org/project/sra-riskgate-mcp/) and the
+[model](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) under Apache 2.0, the
+[benchmark](https://huggingface.co/datasets/sriram1983007/sra-stablecoin-risk-bench) and the real-world dataset
+under CC BY 4.0, and the [paper](https://doi.org/10.5281/zenodo.23715017) on Zenodo. No third party has reproduced the results yet; the evidence pack
+is there so that one can.
+
+**What funding would deliver,** each as a public, open-source milestone with its own evidence pack:
+
+1. **A shared spend ledger across machines**, so budgets hold when an agent runs on many workers.
+2. **Live threat feeds**: sanctions updates and look-alike addresses seen in the wild, published as open data.
+3. **An independent evaluation**: real-world cases collected and labelled by someone other than the author, with
+   the results published whether or not they flatter the library.
+4. **More rails and languages**: a TypeScript library with the same checks for JavaScript agent frameworks, and
+   further chains and stablecoins as agents adopt them.
+
 ## Try it in 30 seconds
 
 ```bash
@@ -113,6 +156,76 @@ Nothing needs a GPU, an API key or a network connection.
 Or run every check in your browser, nothing to install: [open the notebook in Colab](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb).
 
 Walkthrough with more examples: [Stop your AI agent from signing an unlimited USDC approval](https://dev.to/sriram1983007/stop-your-ai-agent-from-signing-an-unlimited-usdc-approval-10c0) (DEV.to).
+
+## Poisoning scan: who is already targeting your wallet (1.14.0+)
+
+`check_payment` stops a payment to a look-alike address. `sra-riskgate scan` finds the look-alikes **before** anyone
+copies one: it reads a wallet's ERC-20 transfer history over standard JSON-RPC and reports every address that
+imitates one of its payees, how it was planted, and the transactions that did it.
+
+```bash
+sra-riskgate scan 0xYourWallet --rpc https://your-rpc-endpoint --write-policy scan-policy.json
+```
+
+Example output (illustrative; addresses shortened here, printed in full):
+
+```text
+FOUND 2 look-alike(s) targeting 0x…
+  chain 1, blocks 23690001-23890000, 14 payees, 311 other transfers checked (strict rule)
+  0x2ffb5c…19b7ee  imitates 0x2ffb88…72deb7ee  (4+4 characters, zero_value_transfer, 3 tx)
+  0x2ffb0e…a3b7ee  imitates 0x2ffb88…72deb7ee  (4+4 characters, fake_token, 1 tx)
+  policy written: scan-policy.json (sra-riskgate policy validate scan-policy.json)
+```
+
+- **Payees** are the addresses the wallet sent a non-zero amount of a listed stablecoin to (USDC, USDT, USDB,
+  USDG and any you registered), plus any in `--known FILE`.
+- **Findings** are other addresses in a `Transfer` event with the wallet on one side that imitate a payee, by the
+  same rule as `LOOKALIKE_RECIPIENT` (strict by default: every shape among the 179 real attacks in the
+  [real-world dataset](https://huggingface.co/datasets/sriram1983007/sra-real-world-poisoning) is found).
+  Each is labelled `zero_value_transfer` (real USDC or USDT moved 0 "from" you), `fake_token` or `dust_received`,
+  with explorer links.
+- **Paid both:** if the wallet has already paid two addresses that look alike, both are listed, since one may be a
+  poisoned copy that was paid.
+- `--write-policy` writes a policy with every look-alike in `blocked_addresses` (add `--include-payees` to also
+  make the payees `known_recipients`), ready for `check_payment(policy=...)`, the MCP server or the command line.
+- Exit **0** clean, **10** found, **1** clean but the range was not fully read, **3** error. In Python:
+  `from sra_riskgate.scan import scan_wallet, scan_policy`.
+
+It uses only `eth_chainId`, `eth_blockNumber` and `eth_getLogs`, halving its block range when a provider limits it,
+within a request budget (`--max-requests`, default 1000). It reads the last 200,000 blocks by default (about a month
+on Ethereum, under a week on Base; change with `--blocks` or `--from-block`) and only ERC-20 `Transfer` events, so
+native-coin dust is not covered. A match is a pattern, very unlikely to be chance, not proof of intent. Your wallet
+address goes to the RPC provider you choose and nowhere else.
+
+## Evidence packs for grant assessors and auditors (1.13.0+)
+
+Reviewers ask four things: does it work, what does it cover, can I see real output, and has any of it been edited.
+`sra-riskgate evidence build` answers all four in one folder, offline, from the installed library:
+
+```bash
+sra-riskgate evidence build --out evidence/                                   # demo audit report
+sra-riskgate evidence build --out evidence/ --receipts receipts.jsonl --key-env SRA_RECEIPT_KEY \
+    --policy payment-policy.json --tests tests/ --zip                         # your own decisions
+sra-riskgate evidence verify evidence.zip                                     # exit 1 if any file changed
+```
+
+| File | What it shows |
+| --- | --- |
+| `README.md` | What the pack shows, the command that reproduces each file, and its limits, for a reader with no context |
+| `selfcheck.json` | Known-answer checks: sanctioned and look-alike payees rejected, self-approving text and payee changes held, a malformed address failing closed, a normal payment approved |
+| `bench.json`, `bench.md`, `bench_cases.jsonl` | The utility vs security benchmark for every guard and baseline, with every case and its answer |
+| `threats.json`, `threats.md` | Each OWASP LLM 2025 and Agentic 2026 entry, the flags that address it, and the ones not addressed |
+| `audit_report.json`, `audit_report.md` | Built from your signed receipts; without them, from a labelled demo chain signed with a published key, so anyone can verify it |
+| `tests.json` | With `--tests`: passed, failed and skipped, and the exact command |
+| `policy.json` | With `--policy`: the policy's name, SHA-256 and the settings it uses, never its addresses |
+| `environment.json` | Library and Python versions, the OFAC snapshot date, and a SHA-256 of every source file (`code_sha256`) |
+| `MANIFEST.json` | The SHA-256 of every file and `pack_sha256` over them all; publish `pack_sha256` with your application |
+
+The build exits 1 if the self-check fails, a supplied receipt does not verify, or the tests fail, so a pack that
+says it is ready is one whose checks passed. The same is available in Python:
+`from sra_riskgate.evidence import build_evidence_pack, verify_evidence_pack`. The pack inherits the limits of what
+it contains: synthetic benchmark cases from the same author, an OWASP mapping not reviewed by OWASP, and receipts
+that prove decisions, not settlement.
 
 ## Negotiations, audit reports and known risks (1.12.0+)
 
@@ -194,6 +307,8 @@ rows as coverage of these patterns, not independent accuracy; real-world numbers
 sra-riskgate check --chain 8453 --sender 0xAgent --to 0xPayee --amount 25 --peg 0 --policy policy.json
 sra-riskgate policy validate payment-policy.json
 sra-riskgate receipt verify receipt.json --key-env SRA_RECEIPT_KEY
+sra-riskgate evidence build --out evidence/ --zip && sra-riskgate evidence verify evidence.zip
+sra-riskgate scan 0xYourWallet --rpc https://your-rpc-endpoint --write-policy scan-policy.json
 ```
 
 `check` exits with **0 approve, 10 hold, 20 reject**, so a CI job or a shell script can stop a payment flow on a
@@ -1033,19 +1148,19 @@ middleware in front of fund-moving tools. It is listed in the LangChain integrat
 
 ## Model results
 
-Measured by the author in two separate full runs on all 2,000 held-out test cases (identical results), with
+Measured by the author on all 2,000 held-out test cases (v1 in two separate full runs, identical results), with
 every prediction published in [sra-bench-results](https://huggingface.co/datasets/sriram1983007/sra-bench-results)
 so anyone can re-score them. No third party has reproduced them yet. You can try the model on test cases for
 free in the [Kaggle notebook](https://www.kaggle.com/code/sriram1983007/try-sra-riskgate-4b-payment-safety-model)
 (the benchmark is also on [Kaggle](https://www.kaggle.com/datasets/sriram1983007/sra-stablecoin-risk-bench)).
 
-| Metric | Base Qwen3-4B | SRA-RiskGate-4B |
-|---|---|---|
-| Unsafe payment approvals ↓ | 34.6% | **0.47%** |
-| Payment decision accuracy ↑ | 59.8% | **99.5%** |
-| Injected payments approved ↓ | 52.2% | **5.8%** |
-| Dispute outcome accuracy ↑ | 0.0% | **77.8%** |
-| Over-blocking ↓ | 5.2% | **0.0%** |
+| Metric | Base Qwen3-4B | v1 | **SRA-RiskGate-4B v2** (current) |
+|---|---|---|---|
+| Unsafe payment approvals ↓ | 34.6% | 0.47% | **0.35%** |
+| Payment decision accuracy ↑ | 59.8% | 99.5% | **99.6%** |
+| Injected payments approved ↓ | 52.2% | 5.8% | **2.9%** |
+| Dispute outcome accuracy ↑ | 0.0% | 77.8% | **90.2%** |
+| Over-blocking ↓ | 5.2% | 0.0% | **0.0%** |
 
 See the [model card](https://huggingface.co/sriram1983007/SRA-RiskGate-4B) for the full table
 and limitations. GGUF builds for llama.cpp, Ollama and LM Studio:

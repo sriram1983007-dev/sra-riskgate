@@ -128,6 +128,9 @@ _MAP: Dict[str, Tuple[str, Tuple[str, ...]]] = {
     # the check itself could not complete, so it held (fail closed)
     "CHECK_FAILED": ("fail_closed", ("ASI08",)),
     "SCREENING_UNAVAILABLE": ("fail_closed", ("ASI08",)),
+    "CLOUD_UNAVAILABLE": ("fail_closed", ("ASI08",)),
+    "CLOUD_AUTH_FAILED": ("fail_closed", ("ASI08",)),
+    "CLOUD_QUOTA_EXCEEDED": ("fail_closed", ("ASI08",)),
     "CONFIGURATION_ERROR": ("fail_closed", ()),
     "INVALID_REQUEST": ("fail_closed", ()),
     "INVALID_TRANSACTION": ("fail_closed", ()),

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sra-riskgate-cloud"
+version = "0.1.0"
+description = "SRA-RiskGate Cloud: shared spend budgets, a threat feed and a signed receipt vault for AI agents that pay."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Sriram Ramakrishnan" }]
+dependencies = ["sra-riskgate>=2.0.0", "fastapi>=0.110", "uvicorn>=0.29"]
+keywords = ["stablecoin", "payments", "ai-agents", "x402", "risk", "budgets", "audit"]
+
+[project.optional-dependencies]
+x402 = ["x402[fastapi,evm]>=2.25,<3"]
+test = ["pytest>=7", "httpx>=0.27"]
+
+[project.scripts]
+sra-cloud = "sra_riskgate_cloud.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sriram1983007-dev/sra-riskgate/tree/main/cloud"
+
+[tool.setuptools.packages.find]
+include = ["sra_riskgate_cloud*"]

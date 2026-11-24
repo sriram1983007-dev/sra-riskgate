@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.0 — 2026-11-23
+
+### Added: SRA-RiskGate Cloud
+- **`CloudClient`** (`sra_riskgate.cloud`): `check_payment` locally first, then the cloud for budgets shared across
+  every machine, the threat feed and a signed, chained receipt in the vault. Only payment fields are sent; the
+  stricter decision wins; an unreachable cloud, a refused key or a reached monthly limit gives **hold**
+  (`CLOUD_UNAVAILABLE`, `CLOUD_AUTH_FAILED`, `CLOUD_QUOTA_EXCEEDED`), or the local decision with
+  `on_cloud_error="local"`. Also `release`, `feed_addresses`, `report_scan`, `get_policy`/`set_policy`,
+  `receipts`, `report`, `usage`.
+- **The service, open source in `cloud/`** (`sra-riskgate-cloud` 0.1.0): FastAPI app with API keys, plans and
+  monthly limits, the shared ledger, a threat feed that needs two organisations (or an operator) per address,
+  the receipt vault and audit report, x402 pay-per-check through the official x402 SDK, a dashboard, an admin
+  command line (`sra-cloud`), a Dockerfile and a Fly.io config.
+
+### What 2.0 means
+- No decision changes and nothing removed: 1.x code runs unchanged. From 2.0 the public API, the command line and
+  its exit codes, and the receipt and policy formats change incompatibly only in a new major version.
+
 ## 1.14.0 — 2026-11-21
 
 ### Added: poisoning scan

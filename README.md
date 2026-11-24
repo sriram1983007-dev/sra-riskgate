@@ -55,6 +55,8 @@ payment arrived, and every decision can carry a signed, tamper-evident receipt.
 - **x402 facilitators and payment servers**: refuse over-long signatures and poisoned payees before settling them.
 - **Compliance and audit**: signed receipts that prove what was decided, under which policy, and when, and an
   audit report built from them, mapped to the OWASP LLM and agentic risk lists.
+- **Teams running agents on many machines**: [SRA-RiskGate Cloud](#sra-riskgate-cloud-shared-budgets-threat-feed-and-receipt-vault-200)
+  for budgets shared across every machine, a threat feed and a receipt vault.
 - **Wallet owners and treasury teams**: a [poisoning scan](#poisoning-scan-who-is-already-targeting-your-wallet-1140)
   that finds the look-alike addresses already planted in a wallet's history and blocks them.
 - **Grant assessors and security reviewers**: one command builds a verifiable
@@ -156,6 +158,46 @@ Nothing needs a GPU, an API key or a network connection.
 Or run every check in your browser, nothing to install: [open the notebook in Colab](https://colab.research.google.com/github/sriram1983007-dev/sra-riskgate/blob/main/notebooks/try-sra-riskgate.ipynb).
 
 Walkthrough with more examples: [Stop your AI agent from signing an unlimited USDC approval](https://dev.to/sriram1983007/stop-your-ai-agent-from-signing-an-unlimited-usdc-approval-10c0) (DEV.to).
+
+## SRA-RiskGate Cloud: shared budgets, threat feed and receipt vault (2.0.0+)
+
+Everything above runs free and offline on one machine, and always will. When your agents run on many machines,
+`CloudClient` adds what one machine cannot do alone:
+
+```python
+from sra_riskgate import CloudClient
+
+cloud = CloudClient()   # SRA_CLOUD_URL and SRA_CLOUD_API_KEY
+cloud.set_policy({"version": 1, "budgets": {"window_hours": 24, "total": 500, "per_payee": 200}})
+
+r = cloud.check_payment(chain_id=8453, sender=agent, recipient=payee, amount=25, peg_deviation_pct=0.0,
+                        untrusted_request=invoice_text, payment_id="inv-42")
+if r.approved:
+    send_payment()
+else:
+    print(r.decision, r.flags, r.explanation)
+```
+
+- **Shared budgets:** one spend ledger for every machine; the budget check and its entry are atomic.
+- **Threat feed:** look-alike addresses from poisoning scans (`cloud.report_scan(scan_wallet(...))`), applied as a
+  blocklist. An address enters the shared feed only after two organisations report it, or an operator approves it.
+- **Receipt vault:** every cloud decision signed with your organisation's key, chained and stored;
+  `cloud.report()` is the audit report.
+- **Pay per check with x402:** agents with no account can pay per check in USDC.
+
+**How it stays safe to depend on.** The check runs locally first, with every argument, so the payment's free text
+never leaves your machine. Only a payment the local check approves goes to the cloud, and the stricter decision
+wins. If the cloud is unreachable, refuses the key or the monthly limit is reached, the result is **hold**
+(`CLOUD_UNAVAILABLE`, `CLOUD_AUTH_FAILED`, `CLOUD_QUOTA_EXCEEDED`), never approve.
+
+The service is open source too, in [`cloud/`](cloud/): run it yourself or use the hosted one.
+
+### What 2.0 means
+
+2.0.0 changes no decision and removes nothing: code written for 1.x runs unchanged. The major version marks a
+promise: from 2.0, the public API (everything in `sra_riskgate.__all__`, the command line and its exit codes, the
+receipt and policy formats) changes incompatibly only in a new major version, with the old behaviour deprecated for
+at least one minor release first.
 
 ## Poisoning scan: who is already targeting your wallet (1.14.0+)
 

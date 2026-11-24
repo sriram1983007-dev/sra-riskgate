@@ -24,6 +24,7 @@ from .report import audit_report, audit_report_markdown
 from .threats import threats_for
 from .evidence import build_evidence_pack, verify_evidence_pack
 from .scan import scan_wallet, scan_policy, ScanError
+from .cloud import CloudClient, CloudCheck, CloudError
 
 __all__ = [
     "RiskGate",
@@ -95,5 +96,8 @@ __all__ = [
     "scan_wallet",
     "scan_policy",
     "ScanError",
+    "CloudClient",
+    "CloudCheck",
+    "CloudError",
 ]
-__version__ = "1.14.0"
+__version__ = "2.0.0"

@@ -1,0 +1,31 @@
+# Fly.io config. Deploy from the repository root:
+#   fly apps create YOUR-APP-NAME     (then put that name in "app" below)
+#   fly volumes create sra_data --size 1 --region iad --config cloud/fly.toml
+#   fly deploy --config cloud/fly.toml --dockerfile cloud/Dockerfile
+app = "sra-riskgate-cloud"
+primary_region = "iad"
+
+[env]
+  SRA_CLOUD_DB = "/data/sra-cloud.db"
+
+[mounts]
+  source = "sra_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

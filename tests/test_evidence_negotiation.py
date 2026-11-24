@@ -103,7 +103,7 @@ def _emitted_flags():
     names = set(re.findall(r'"([A-Z][A-Z0-9_]{5,})"', src))
     not_flags = {"STABLECOINS", "GUARDS", "DEFAULT_COUNTS", "ELLIPTIC_SECRET", "ELLIPTIC_KEY", "CHAINALYSIS_API_KEY",
                  "PAYMENT_SYSTEM_PROMPT", "DISPUTE_SYSTEM_PROMPT", "BLOCKED", "ADDRESS", "COMMAND",
-                 "DEMO_RECEIPT_KEY", "TRANSFER_TOPIC"}
+                 "DEMO_RECEIPT_KEY", "TRANSFER_TOPIC", "SRA_CLOUD_API_KEY", "SRA_CLOUD_URL"}
     return names - not_flags
 
 

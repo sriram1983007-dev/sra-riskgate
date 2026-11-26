@@ -1,0 +1,89 @@
+{
+ "approved": 0,
+ "attacks": 179,
+ "busy_wallet_limit": {
+  "1": {
+   "approved": 0,
+   "attacks": 138,
+   "rejected": 131,
+   "share": 0.9492753623188406
+  },
+  "20": {
+   "approved": 0,
+   "attacks": 218,
+   "rejected": 204,
+   "share": 0.9357798165137615
+  },
+  "5": {
+   "approved": 0,
+   "attacks": 179,
+   "rejected": 171,
+   "share": 0.9553072625698324
+  },
+  "none": {
+   "approved": 0,
+   "attacks": 254,
+   "rejected": 211,
+   "share": 0.8307086614173228
+  }
+ },
+ "lost_usd": 3327006,
+ "lost_usd_median": 220.0,
+ "model": {
+  "attacks_under_limit": 58,
+  "attacks_under_limit_stopped": 2,
+  "known_payee_controls": 64,
+  "known_payee_controls_stopped": 4,
+  "over_limit": 109,
+  "over_limit_approved": 0,
+  "real_payments": 300,
+  "real_payments_matching": 300,
+  "under_limit": 191,
+  "under_limit_blocked": 0
+ },
+ "normal": 4967,
+ "normal_strict_would_reject": 1,
+ "normal_wrongly_rejected": 0,
+ "not_rejected": 8,
+ "not_rejected_held": 8,
+ "not_rejected_three_and_three": 8,
+ "rejected": 171,
+ "rejected_lost_usd": 3326190,
+ "rejected_share": 0.9553072625698324,
+ "repeat_payee": 3630,
+ "repeat_payee_approved": 3630,
+ "victims": 175,
+ "provenance": {
+  "schema": "https://github.com/ASSERT-KTH/assert-research-agent/blob/main/schemas/provenance-v1.json",
+  "command": [
+   "python",
+   "paper/study/real_world.py",
+   "paper/data/sra-real-world-poisoning/attacks.csv",
+   "paper/data/sra-real-world-poisoning/normal.csv",
+   "paper/data/sra-real-world-poisoning/summary.json",
+   "paper/data/sra-real-world-poisoning/model_eval/model_summary.json"
+  ],
+  "cwd": ".",
+  "inputs": [
+   {
+    "path": "paper/data/sra-real-world-poisoning/attacks.csv",
+    "sha256": "be1edcee4239bd7706236d07dbdd02b5bca34c7af03673f4cc6513f4b8ab1ae5"
+   },
+   {
+    "path": "paper/data/sra-real-world-poisoning/normal.csv",
+    "sha256": "56a91639e2aa84492dce224f6ffaba4debb7c8a8d96cecc2bb1face3dd7baf9d"
+   },
+   {
+    "path": "paper/data/sra-real-world-poisoning/summary.json",
+    "sha256": "304ef1da51197083db4caf686f5e1b89d39633db06fd229b78e9ac6b482618e2"
+   },
+   {
+    "path": "paper/data/sra-real-world-poisoning/model_eval/model_summary.json",
+    "sha256": "1718a9fbfaed6676a8f5d9aac35b28a958622271f0967784d67b6df1329c569e"
+   }
+  ],
+  "commit": "94b1550631833845b1c7032b266f78a35657d2f2",
+  "now": "2026-11-26T04:23:05+00:00",
+  "osaudit": "0.7.0"
+ }
+}

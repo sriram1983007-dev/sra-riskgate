@@ -1,0 +1,184 @@
+{
+ "runs": {
+  "base": {
+   "cases": 2000,
+   "decision_accuracy": 0.5983,
+   "dispute_accuracy": 0.0,
+   "disputes": 825,
+   "impossible_remedies": 0.0,
+   "injected": 69,
+   "injected_approved": 0.5217,
+   "over_blocking": 0.0518,
+   "payments": 1175,
+   "refund_details": 0.0,
+   "sra_score": 0.421,
+   "unsafe_approvals": 0.3459,
+   "wrongful_denials": 0.0,
+   "wrongful_refunds": 0.0
+  },
+  "q4": {
+   "cases": 2000,
+   "decision_accuracy": 0.9932,
+   "dispute_accuracy": 0.6739,
+   "disputes": 825,
+   "impossible_remedies": 0.0,
+   "injected": 69,
+   "injected_approved": 0.058,
+   "over_blocking": 0.0,
+   "payments": 1175,
+   "refund_details": 0.3532,
+   "sra_score": 0.8568,
+   "unsafe_approvals": 0.0083,
+   "wrongful_denials": 0.5532,
+   "wrongful_refunds": 0.0068
+  },
+  "q8": {
+   "cases": 2000,
+   "decision_accuracy": 0.9949,
+   "dispute_accuracy": 0.7855,
+   "disputes": 825,
+   "impossible_remedies": 0.0019,
+   "injected": 69,
+   "injected_approved": 0.058,
+   "over_blocking": 0.0,
+   "payments": 1175,
+   "refund_details": 0.6681,
+   "sra_score": 0.918,
+   "unsafe_approvals": 0.0047,
+   "wrongful_denials": 0.234,
+   "wrongful_refunds": 0.022
+  },
+  "v1": {
+   "cases": 2000,
+   "decision_accuracy": 0.9949,
+   "dispute_accuracy": 0.7782,
+   "disputes": 825,
+   "impossible_remedies": 0.0038,
+   "injected": 69,
+   "injected_approved": 0.058,
+   "over_blocking": 0.0,
+   "payments": 1175,
+   "refund_details": 0.6426,
+   "sra_score": 0.9134,
+   "unsafe_approvals": 0.0047,
+   "wrongful_denials": 0.2596,
+   "wrongful_refunds": 0.022
+  },
+  "v2": {
+   "cases": 2000,
+   "decision_accuracy": 0.9957,
+   "dispute_accuracy": 0.9018,
+   "disputes": 825,
+   "impossible_remedies": 0.0057,
+   "injected": 69,
+   "injected_approved": 0.029,
+   "over_blocking": 0.0,
+   "payments": 1175,
+   "refund_details": 0.8766,
+   "sra_score": 0.9604,
+   "unsafe_approvals": 0.0035,
+   "wrongful_denials": 0.0213,
+   "wrongful_refunds": 0.022
+  },
+  "v2_no_window": {
+   "cases": 2000,
+   "decision_accuracy": 0.9957,
+   "dispute_accuracy": 0.8497,
+   "disputes": 825,
+   "impossible_remedies": 0.0057,
+   "injected": 69,
+   "injected_approved": 0.029,
+   "over_blocking": 0.0,
+   "payments": 1175,
+   "refund_details": 0.8723,
+   "sra_score": 0.9501,
+   "unsafe_approvals": 0.0035,
+   "wrongful_denials": 0.034,
+   "wrongful_refunds": 0.0356
+  }
+ },
+ "sra_real": {
+  "base": {
+   "cases": 227,
+   "decision_accuracy": 0.7841,
+   "unsafe_approvals": 0.2895
+  },
+  "changed": 76,
+  "unchanged": 151,
+  "v1": {
+   "cases": 227,
+   "decision_accuracy": 1.0,
+   "unsafe_approvals": 0.0
+  },
+  "v2": {
+   "cases": 227,
+   "decision_accuracy": 1.0,
+   "unsafe_approvals": 0.0
+  },
+  "v2_changed_stopped": 76,
+  "v2_unchanged_approved": 151
+ },
+ "provenance": {
+  "schema": "https://github.com/ASSERT-KTH/assert-research-agent/blob/main/schemas/provenance-v1.json",
+  "command": [
+   "python",
+   "paper/study/benchmark.py",
+   "paper/data/sra-bench-results/qwen3-4b-instruct-base/scores.json",
+   "paper/data/sra-bench-results/sra-riskgate-4b/scores.json",
+   "paper/data/sra-bench-results/sra-riskgate-4b-v2/scores.json",
+   "paper/data/sra-bench-results/sra-riskgate-4b-v2-no-window/scores.json",
+   "paper/data/sra-bench-results/sra-riskgate-4b-q8_0/scores.json",
+   "paper/data/sra-bench-results/sra-riskgate-4b-q4_k_m/scores.json",
+   "paper/data/sra-bench-results/sra-real-v1/qwen3-4b-instruct-base/scores.json",
+   "paper/data/sra-bench-results/sra-real-v1/sra-riskgate-4b-v1/scores.json",
+   "paper/data/sra-bench-results/sra-real-v1/sra-riskgate-4b-v2/scores.json",
+   "paper/data/sra-bench-results/sra-real-v1/summary.json"
+  ],
+  "cwd": ".",
+  "inputs": [
+   {
+    "path": "paper/data/sra-bench-results/qwen3-4b-instruct-base/scores.json",
+    "sha256": "555fc4c1dad357e7eeeb96a8e3c4893e84fbdb745d8435013a80a767dae0994b"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-riskgate-4b/scores.json",
+    "sha256": "1e6aa806cf441441a8e0c222fccc98379175e3b263b72568f520faef0e1d77dc"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-riskgate-4b-v2/scores.json",
+    "sha256": "ec61f01d6d06fb490c69ccb83dbedfcaed250add16053e0cca64f4a974412541"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-riskgate-4b-v2-no-window/scores.json",
+    "sha256": "50b083f954853b99b56aa78f0f0c7c977fbe399cd83da208ccdf36f53a682d49"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-riskgate-4b-q8_0/scores.json",
+    "sha256": "e60c3151556546380d6c9b02c3f2a05cb13f82d7554417b2c719972d37367eec"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-riskgate-4b-q4_k_m/scores.json",
+    "sha256": "cb35632ad7683ebb0a4a8baa4e6fe84329d960c32e65af563403c52819b5686e"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-real-v1/qwen3-4b-instruct-base/scores.json",
+    "sha256": "b4eeb48b2ac41b21cf872ef5c4d779a258040e9f765e9f326c10055795a0857f"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-real-v1/sra-riskgate-4b-v1/scores.json",
+    "sha256": "d4eb3e3f8a0352331dc70dfeda2b85a1d2554fe8066ff0c6a247793731b8aac8"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-real-v1/sra-riskgate-4b-v2/scores.json",
+    "sha256": "2f90a13fc0b41008be5e2396c1cc5a449e06c6fc1896d0886b7d7bb3da1e284f"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-real-v1/summary.json",
+    "sha256": "a9263f753095a7da95a34b2ea5094c439f3c0b5b8e0b91f0b6de02e5cf373b98"
+   }
+  ],
+  "commit": "94b1550631833845b1c7032b266f78a35657d2f2",
+  "now": "2026-11-26T04:23:03+00:00",
+  "osaudit": "0.7.0"
+ }
+}

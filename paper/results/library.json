@@ -1,0 +1,87 @@
+{
+ "bench": {
+  "approve-all": {
+   "cases": 560,
+   "legit_blocked": 0,
+   "security": 0.0,
+   "seed": 1,
+   "unsafe_approved": 260,
+   "utility": 1.0
+  },
+  "hold-new": {
+   "cases": 560,
+   "legit_blocked": 111,
+   "security": 0.8846,
+   "seed": 1,
+   "unsafe_approved": 30,
+   "utility": 0.63
+  },
+  "standard": {
+   "cases": 560,
+   "legit_blocked": 0,
+   "security": 0.8962,
+   "seed": 1,
+   "unsafe_approved": 27,
+   "utility": 1.0
+  },
+  "strict": {
+   "cases": 560,
+   "legit_blocked": 0,
+   "security": 0.9115,
+   "seed": 1,
+   "unsafe_approved": 23,
+   "utility": 1.0
+  },
+  "strict-hold-new": {
+   "cases": 560,
+   "legit_blocked": 111,
+   "security": 1.0,
+   "seed": 1,
+   "unsafe_approved": 0,
+   "utility": 0.63
+  }
+ },
+ "bench_strict": {
+  "lookalike_rejected": 80,
+  "payee_change_missed": 12,
+  "self_approval_missed": 11
+ },
+ "flags": 93,
+ "owasp_addressed": 13,
+ "owasp_entries": 20,
+ "owasp_not_addressed": 7,
+ "selfcheck": {
+  "passed": 8,
+  "total": 8
+ },
+ "version": "2.0.0",
+ "provenance": {
+  "schema": "https://github.com/ASSERT-KTH/assert-research-agent/blob/main/schemas/provenance-v1.json",
+  "command": [
+   "python",
+   "paper/study/library.py"
+  ],
+  "cwd": ".",
+  "inputs": [
+   {
+    "path": "sra_riskgate/bench.py",
+    "sha256": "b7d168ec4cf0cacd83d15e330c052bb283023010a71357f4e049283af2729841"
+   },
+   {
+    "path": "sra_riskgate/threats.py",
+    "sha256": "2c8d7bb7237935a3c78285047372f192280df8f29804637b9cbbfe46c79c5628"
+   },
+   {
+    "path": "sra_riskgate/evidence.py",
+    "sha256": "7c3277fc08e0680aa349a7a7bb2a3d4f0d3692e5f0cf4f3ef232f63941f6d047"
+   },
+   {
+    "path": "sra_riskgate/check.py",
+    "sha256": "c4982832171694f37c551cd13681a5571fc2f754963f214b8a393a24a23f87bb"
+   }
+  ],
+  "commit": "94b1550631833845b1c7032b266f78a35657d2f2",
+  "now": "2026-11-26T04:23:05+00:00",
+  "osaudit": "0.7.0"
+ }
+}

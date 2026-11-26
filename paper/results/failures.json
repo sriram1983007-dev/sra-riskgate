@@ -1,0 +1,139 @@
+{
+ "claims": {
+  "legitimate_checked": 3358,
+  "legitimate_flagged": 0,
+  "v1": {
+   "held_by_check": 4,
+   "risky": 847,
+   "unsafe": 4,
+   "unsafe_after_check": 0,
+   "unsafe_injected": 4,
+   "unsafe_rate_after_check": 0.0
+  },
+  "v2": {
+   "held_by_check": 2,
+   "risky": 847,
+   "unsafe": 3,
+   "unsafe_after_check": 1,
+   "unsafe_injected": 2,
+   "unsafe_rate_after_check": 0.0011806375442739079
+  }
+ },
+ "contamination_v1": {
+  "dispute_twins": 0,
+  "exact_duplicates": 0,
+  "no_twin": {
+   "accuracy": 0.9927007299270073,
+   "cases": 548,
+   "risky": 481,
+   "unsafe": 4,
+   "unsafe_rate": 0.008316008316008316
+  },
+  "payment_twins": 627,
+  "payment_twins_same_label": 531,
+  "twin": {
+   "accuracy": 0.9968102073365231,
+   "cases": 627,
+   "risky": 366,
+   "unsafe": 0,
+   "unsafe_rate": 0.0
+  }
+ },
+ "splits": {
+  "disputes": 825,
+  "injected": 69,
+  "legitimate": 328,
+  "payments": 1175,
+  "risky": 847,
+  "test": 2000,
+  "total": 20000,
+  "train": 18000
+ },
+ "window_check": {
+  "q4": {
+   "after": {
+    "accuracy": 0.6921212121212121,
+    "wrongful_denials": 0.00851063829787234,
+    "wrongful_refunds": 0.006779661016949152
+   },
+   "before": {
+    "accuracy": 0.673939393939394,
+    "wrongful_denials": 0.5531914893617021,
+    "wrongful_refunds": 0.006779661016949152
+   }
+  },
+  "v1": {
+   "after": {
+    "accuracy": 0.7866666666666666,
+    "wrongful_denials": 0.00851063829787234,
+    "wrongful_refunds": 0.022033898305084745
+   },
+   "before": {
+    "accuracy": 0.7781818181818182,
+    "wrongful_denials": 0.25957446808510637,
+    "wrongful_refunds": 0.022033898305084745
+   }
+  },
+  "v2": {
+   "after": {
+    "accuracy": 0.9030303030303031,
+    "wrongful_denials": 0.0,
+    "wrongful_refunds": 0.022033898305084745
+   },
+   "before": {
+    "accuracy": 0.9018181818181819,
+    "wrongful_denials": 0.02127659574468085,
+    "wrongful_refunds": 0.022033898305084745
+   }
+  }
+ },
+ "window_claims_v1": {
+  "claims": 112,
+  "false_claim_share": 0.8125,
+  "false_claims": 91,
+  "gold_outside": 54,
+  "gold_outside_but_inside": 0,
+  "missed_outside": 33,
+  "true_claims": 21,
+  "wrongful_denials": 61,
+  "wrongful_denials_dismiss_window": 59
+ },
+ "provenance": {
+  "schema": "https://github.com/ASSERT-KTH/assert-research-agent/blob/main/schemas/provenance-v1.json",
+  "command": [
+   "python",
+   "paper/study/failures.py",
+   "paper/data/sra-stablecoin-risk-bench/data/benchmark/test.jsonl",
+   "paper/data/sra-stablecoin-risk-bench/data/benchmark/train.jsonl",
+   "paper/data/sra-bench-results/sra-riskgate-4b/predictions.jsonl",
+   "paper/data/sra-bench-results/sra-riskgate-4b-v2/predictions.jsonl",
+   "paper/data/sra-bench-results/sra-riskgate-4b-q4_k_m/predictions.jsonl"
+  ],
+  "cwd": ".",
+  "inputs": [
+   {
+    "path": "paper/data/sra-stablecoin-risk-bench/data/benchmark/test.jsonl",
+    "sha256": "c62136b8fceed3a075fd91119103e5bdc007759497079bd1978d76508804c410"
+   },
+   {
+    "path": "paper/data/sra-stablecoin-risk-bench/data/benchmark/train.jsonl",
+    "sha256": "87f02cfe58b22c7130432e4af984d7721c2a374436f44ccc930415843be9de36"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-riskgate-4b/predictions.jsonl",
+    "sha256": "9aeef4d897868cdefeb433bacdf2dd8aedfd06068694c5ac1d55f79a890b056b"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-riskgate-4b-v2/predictions.jsonl",
+    "sha256": "246990146e070eb07fbba790bedae14ed032154fc32e55331b06b6ba569a8b9c"
+   },
+   {
+    "path": "paper/data/sra-bench-results/sra-riskgate-4b-q4_k_m/predictions.jsonl",
+    "sha256": "3d16663577501aef2fac78b988961ff3c9066ece23e6ae599353ea75a8404784"
+   }
+  ],
+  "commit": "94b1550631833845b1c7032b266f78a35657d2f2",
+  "now": "2026-11-26T04:23:03+00:00",
+  "osaudit": "0.7.0"
+ }
+}

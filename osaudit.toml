@@ -1,0 +1,139 @@
+schema = "https://github.com/ASSERT-KTH/assert-research-agent/blob/main/schemas/audit-v1.json"
+
+# Open-science audit of the paper (https://github.com/ASSERT-KTH/osaudit).
+# Every number in paper/main.tex is traced to a results file below, derived from one, or allowed with a reason.
+# Results files are produced by paper/run_study.sh, which runs each instrument through `osaudit run`.
+
+[paper]
+tex = ["paper/main.tex"]
+
+[results]
+files = ["paper/results/*.json"]
+instruments = ["paper/study/*.py"]
+
+[[results.depends]]
+file = "paper/results/benchmark.json"
+instruments = ["paper/study/benchmark.py", "paper/study/_common.py"]
+
+[[results.depends]]
+file = "paper/results/failures.json"
+instruments = ["paper/study/failures.py", "paper/study/_common.py"]
+
+[[results.depends]]
+file = "paper/results/real_world.json"
+instruments = ["paper/study/real_world.py", "paper/study/_common.py"]
+
+[[results.depends]]
+file = "paper/results/library.json"
+instruments = ["paper/study/library.py", "paper/study/_common.py"]
+
+[[numbers.derive]]
+value = "16.8"
+expr = "16 * 16 * 16 * 16 * 16 * 16 / 1000000"
+
+[[numbers.allow]]
+value = "2025"
+reason = "publication year of cited standards and documents"
+
+[[numbers.allow]]
+value = "2026"
+reason = "year of this paper, of its data window and of cited documents"
+
+[[numbers.allow]]
+value = "3009"
+reason = "name of the token standard EIP-3009, not a measurement"
+cite = "eip3009"
+
+[[numbers.allow]]
+value = "712"
+reason = "name of the typed-data standard EIP-712, not a measurement"
+cite = "eip712"
+
+[[numbers.allow]]
+value = "2612"
+reason = "name of the permit standard EIP-2612, not a measurement"
+cite = "eip2612"
+
+[[numbers.allow]]
+value = "7702"
+reason = "name of the account-code standard EIP-7702, not a measurement"
+cite = "eip7702"
+
+[[numbers.allow]]
+value = "4337"
+reason = "name of the account-abstraction standard ERC-4337, not a measurement"
+cite = "eip4337"
+
+[[numbers.allow]]
+value = "402"
+reason = "HTTP status code 402 (Payment Required), used by x402"
+cite = "x402"
+
+[[numbers.allow]]
+value = "256"
+reason = "name of the hash function SHA-256 (and HMAC-SHA256), not a measurement"
+
+[[numbers.allow]]
+value = "10"
+reason = "name of the OWASP Top 10 lists, and the exponent of the learning rate 10^-4 in training/train.py"
+
+[[numbers.allow]]
+value = "100"
+reason = "the extra seconds of validity Circle's Gateway client SDK adds to a seven-day signature, a constant of that SDK"
+cite = "gateway"
+
+[[numbers.allow]]
+value = "16"
+reason = "effective training batch size, set in training/train.py (2 per device x 8 accumulation steps)"
+
+[[numbers.allow]]
+value = "32"
+reason = "LoRA rank, set in training/train.py"
+
+[[numbers.allow]]
+value = "3,072"
+reason = "maximum training sequence length in tokens, set in training/train.py"
+
+[[numbers.allow]]
+value = "2507"
+reason = "release tag in the base model's name, Qwen3-4B-Instruct-2507"
+cite = "qwen3"
+
+[[numbers.allow]]
+value = "512"
+reason = "maximum new tokens per answer, set in eval/run_eval.py for every published run"
+cite = "results"
+
+[[numbers.allow]]
+value = "2.5"
+reason = "size in GB of the published Q4_K_M model file"
+cite = "model"
+
+[[numbers.allow]]
+value = "18"
+reason = "day of the month on which the real-world data window ends (18 November 2026)"
+cite = "realworld"
+
+[[numbers.allow]]
+value = "90"
+reason = "length in days of the real-world data window, a parameter of the query"
+cite = "realworld"
+
+[[numbers.allow]]
+value = "200"
+reason = "upper bound on payees per wallet used to sample normal payments, a parameter of the query"
+cite = "realworld"
+
+[[numbers.allow]]
+value = "1,000"
+reason = "per-payment limit in USDC of the policy used for the model's real-payment run, a setting"
+cite = "realworld"
+
+[[numbers.allow]]
+value = "25.075"
+reason = "amount in USDG of the on-chain loan repayment checked with verify_settlement (Robinhood Chain transaction 0xe85c07f5)"
+
+[[numbers.allow]]
+value = "450"
+reason = "number of runs planned in the registered study protocol"
+cite = "deference"
